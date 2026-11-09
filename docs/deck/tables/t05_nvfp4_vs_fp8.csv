@@ -1,4 +1,4 @@
-﻿시험,NVFP4×8 출력 tok/s (배치 토큰 8192),NVFP4×8 출력 tok/s (배치 토큰 2048),FP8×16 출력 tok/s,NVFP4×8 TPOT ms (8192),NVFP4×8 TPOT ms (2048),FP8×16 TPOT ms,NVFP4×8 TTFT ms (8192),NVFP4×8 TTFT ms (2048),FP8×16 TTFT ms
+﻿시험,NVFP4×8 출력 tok/s (배치 토큰 8192),NVFP4×8 출력 tok/s (배치 토큰 2048),"FP8×16 출력 tok/s (2026-10-03 이탈리아 북부·TCP, 교차 비교)",NVFP4×8 TPOT ms (8192),NVFP4×8 TPOT ms (2048),FP8×16 TPOT ms (2026-10-03 이탈리아 북부·TCP),NVFP4×8 TTFT ms (8192),NVFP4×8 TTFT ms (2048),FP8×16 TTFT ms (2026-10-03 이탈리아 북부·TCP)
 latency-in1024,46.1,49.1,48.6,20.4,19.0,19.2,336.8,349.1,355.3
 latency-in8192,33.3,34.2,37.9,21.1,19.7,20.0,2281.4,2438.8,1647.1
 latency-in32768,14.5,15.1,20.3,22.3,20.9,21.1,11973.2,11558.7,7211.3

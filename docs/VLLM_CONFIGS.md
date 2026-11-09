@@ -43,6 +43,9 @@ job은 웹 앱에서 스크립트를 다운로드한다. 데모 전에 플랜 �
 - 속도 수치는 무작위 프롬프트와 `--ignore-eos`를 사용한 `vllm bench serve`
   결과다. 각 지점은 한 번만 실행했다(단일 샘플). 따라서 몇 퍼센트의 차이는
   노이즈일 수 있다.
+- 2026-10-03과 2026-10-04의 측정은 모든 지점에 같은 seed를 썼다. 그래서 뒤 지점이 앞 지점의
+  prompt를 prefix cache에서 재사용했다. 그래서 일부 처리량은 높게, TTFT와 동시 요청 TPOT는 짧게 나왔다(설계 문서 8.1 정정). 2026-10-21
+  expert-parallel 비교는 지점마다 다른 seed를 써서 이 문제가 없다.
 - 비율은 같은 할당에서 측정한 레이아웃끼리 비교한다. 설계 문서의 서로 다른 절에
   있는 수치는 서로 다른 조건(체크포인트 레이블, 컨텍스트, 시퀀스 수, batched
   token 수, 스케줄링, 인터커넥트)에서 측정했다. 따라서 서로 비교하지 않는다.
@@ -71,7 +74,9 @@ job은 웹 앱에서 스크립트를 다운로드한다. 데모 전에 플랜 �
   (vLLM 0.23.0)에서 실행한다. job 시작 시 `aml/src/apply_overlay.py`가 SKT fork
   `axk2-v0.23.0` @ `023bc760`을 추가한다. 이 fork에는 upstream PR #38476의
   포팅(native DSA가 사용하는 `TRITON_MLA_SPARSE` 백엔드와 Triton indexer)과 두 줄짜리
-  Ampere MLA 수정이 들어 있다(설계 문서 4, 5b). NVFP4 항목은
+  Ampere MLA 수정이 들어 있다(설계 문서 4, 5b). 2026-11-09 변경으로 이 포팅에 indexer 디코드 kernel의
+  버그 수정이 들어갔다(설계 문서 5b). 이 카탈로그의 측정은 모두 수정 전 kernel로 실행했다. 버그가 그 결과에 준
+  영향은 확인하지 않았다(처리량, 기능·tool 점검에서는 드러나지 않았다). NVFP4 항목은
   `aml/src/nvfp4_sm80_port.json`(`NVFP4_SM80_PORT=1`, 설계 문서 8.4)도 적용한다.
   A100에서 FP8 linear 레이어와 MoE 레이어는 Marlin W8A16으로, NVFP4 expert는
   Marlin W4A16으로 실행되고, KV cache는 BF16이다.
@@ -140,7 +145,7 @@ job은 웹 앱에서 스크립트를 다운로드한다. 데모 전에 플랜 �
 | 컨텍스트, KV cache | 262,144 토큰. KV cache 673,792 토큰(GPU당 weight 42.3 GiB, KV 25.0 GiB) |
 | 시작 시간 | 2026-10-21 baseline A로 healthy까지 261 s. 설계 문서 8.1에서는 262 s |
 | 측정값(설계 문서 8.7, baseline A, 단일 샘플) | 동시성 1 / 32에서 output tok/s: 1K 입력 48 / 404, 8K 입력 42 / 208, 32K 입력 32 / 61. 단일 요청의 median TPOT 20.7-22.7 ms. 32K 입력, 동시성 32에서 동시에 실행되는 요청은 20개다. 기능 4/4, tool 9/9. |
-| 이전 기록(다른 조건) | 설계 문서 8.1(`native-pp2`, `2287ca45`, priority 스케줄링 없음): tool 9/9, SKT needle test 252,728 토큰까지 9/9, tech report Fig. 7 조건에서 1K-8K 입력 기준 B200 노드 하나의 0.43-0.51x. 설계 문서 8.2(컨텍스트 65,536, 시퀀스 128, vLLM의 A100 기본값인 2,048 batched token, TCP): 302 s 후 healthy, KV cache 724,544 토큰. |
+| 이전 기록(다른 조건) | 설계 문서 8.1(`native-pp2`, `2287ca45`, priority 스케줄링 없음): tool 9/9, SKT needle test 252,728 토큰까지 9/9, tech report Fig. 7 조건에서 1K-8K 입력 기준 B200 노드 하나의 0.43-0.51x(2K-8K는 같은 seed로 인한 prefix cache 재사용으로 부풀었다. 2026-10-21 값으로 환산하면 8K 0.39x). 설계 문서 8.2(컨텍스트 65,536, 시퀀스 128, vLLM의 A100 기본값인 2,048 batched token, TCP): 302 s 후 healthy, KV cache 724,544 토큰. |
 | 주의 사항 | supervisor가 이 job을 렌더링하고 제출한다. 직접 제출하지 않는다. 출력은 비트 단위로 결정적이지 않고, batch-invariant 모드는 시작할 수 없다(설계 문서 8.1). |
 
 ### `demo-nvfp4`: NVFP4, 단일 노드 TP8
@@ -157,7 +162,7 @@ job은 웹 앱에서 스크립트를 다운로드한다. 데모 전에 플랜 �
 | 컨텍스트, KV cache | 254,016 토큰으로 자동 맞춤. KV cache 254,016 토큰(GPU당 weight 48.5 GiB, KV 18.5 GiB) |
 | 시작 시간 | 2026-10-21 baseline D로 healthy까지 442 s. 설계 문서 8.4에서는 433 s |
 | 측정값(설계 문서 8.7, baseline D, 단일 샘플) | 동시성 1 / 32에서 output tok/s: 1K 입력 48 / 445, 8K 입력 42 / 188, 32K 입력 27 / 51. 단일 요청의 median TPOT 20.4-22.4 ms. 32K 입력, 동시성 32에서 동시에 실행되는 요청은 7개다. 기능 4/4, tool 9/9. |
-| 이전 기록(다른 조건) | 설계 문서 8.4(`nvfp4-tp8`, priority 스케줄링 없음): needle 244,898 토큰까지 9/9. Fig. 7 조건에서 1K-4K 입력 기준 B200 노드 하나의 0.47-0.49x. |
+| 이전 기록(다른 조건) | 설계 문서 8.4(`nvfp4-tp8`, priority 스케줄링 없음): needle 244,898 토큰까지 9/9. Fig. 7 조건에서 1K-4K 입력 기준 B200 노드 하나의 0.47-0.49x(2026-10-04 작업은 모든 측정점에 같은 seed를 써서 prefix cache 재사용이 섞였다. 재측정 전까지 사용하지 않는다. 같은 날 D 기준 1K는 0.47x(889.8/1,900)). |
 | 주의 사항 | expert는 W4A16으로 실행된다(A100에는 FP4 tensor core가 없다). 엔진에는 vLLM 0.24 변경 두 건의 backport가 필요하다. 품질은 기능 검사, tool call, needle로만 확인했다(설계 문서 8.4). |
 
 ## Expert-parallel 비교 (2026-10-21, 설계 문서 8.7)
@@ -183,7 +188,8 @@ baseline으로 다시 측정했다.
 
 `--enable-expert-parallel`은 크기가 아니라 스위치다. vLLM 0.23은 각 MoE 레이어를
 해당 pipeline stage의 DP x TP rank에 걸쳐 expert parallel로 만들고 TP 1로 실행한다.
-attention과 shared expert는 자신의 레이아웃을 유지한다(설계 문서 8.7). 코드 변경이
+attention은 자신의 레이아웃을 유지한다. shared expert는 DP = 1인 레이아웃에서 TP로 나뉜 채 유지되고,
+DP2 x TP8 + EP(C2)에서는 GPU마다 통째로 복제된다(설계 문서 8.7). 코드 변경이
 필요한 레이아웃은 없었다. 모든 레이아웃이 CUDA graph로 시작했고 기능 검사 4/4와
 tool call 9/9를 통과했다.
 
@@ -196,6 +202,9 @@ tool call 9/9를 통과했다.
 | `epc-fp8-dp2tp8ep16` (C2) | 처리량 전용 | `--tensor-parallel-size 8 --pipeline-parallel-size 1 --data-parallel-size 2 --data-parallel-size-local 1 --data-parallel-backend ray --enable-expert-parallel` | EP16, 16 | 238,656 / 238,720 + 238,656(엔진 두 개) | 46.4 / 17.4 GiB | 221 s |
 | `epc-nvfp4-tp8` (D) | baseline, = `demo-nvfp4` | `--tensor-parallel-size 8 --pipeline-parallel-size 1 --distributed-executor-backend mp` | 없음 | 254,016 / 254,016 | 48.5 / 18.5 GiB | 442 s |
 | `epc-nvfp4-tp8ep8` (E) | 테스트함, 권장하지 않음 | `--tensor-parallel-size 8 --pipeline-parallel-size 1 --distributed-executor-backend mp --enable-expert-parallel` | EP8, 32 | 253,120 / 253,120 | 48.5 / 18.5 GiB | 312 s |
+
+healthy까지 걸린 시간은 phase마다 1회 측정했고 실행 순서와 cache 상태의 영향을 받는다. FP8 job은 A, B, C1,
+B0, C2 순서로, NVFP4 job은 D 다음 E 순서로 실행했다. 따라서 레이아웃끼리 시작 시간을 비교하지 않는다.
 
 **측정값(지점당 단일 샘플).** baseline은 절댓값이고, 나머지는 A(FP8) 또는
 D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 토큰이다.
@@ -218,7 +227,8 @@ D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 �
   담는다.
 - C1과 E: DP = 1이면 EP는 아무것도 dispatch하지 않는다. 각 rank는 자신의 expert를
   계산하고, 출력은 EP가 없을 때처럼 all-reduce된다. output tok/s는 baseline보다
-  8-12%(C1), 5-7%(E) 낮았다.
+  8-12%(C1), 5-7%(E) 낮았다. 원인은 그룹 라우팅과 linear expert 배치가 겹친 부하 불균형으로
+  추정한다(측정하지 않음, 설계 문서 8.7).
 - C2:
   - 로그에 "Using ray distributed inference because data_parallel_backend
     is ray"가 출력된다. DP rank 0은 노드 0에서, DP rank 1은 노드 1에서 실행된다.
@@ -227,7 +237,9 @@ D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 �
   - MoE dispatch는 InfiniBand 위의 allgather/reduce-scatter를 사용한다
     (`AgRsAll2AllManager`).
   - 8K 입력, 동시성 32에서 median TTFT는 A의 1.56x이고, 컨텍스트는 238,656 토큰으로
-    줄어든다.
+    줄어든다. 줄어든 주된 이유는 GPU마다 통째로 복제한 shared expert다(GPU당 약 2.3 GiB, 추정).
+  - A와의 비교에는 다른 조건이 섞였다. API server가 2개였고, batched token과 시퀀스 한도가 엔진마다
+    적용되어 전체 한도가 A의 2배였다.
 - DeepEP는 이미지에 들어 있지만 Hopper와 Blackwell용으로만 빌드되어 A100에서
   실행되지 않는다. EPLB, `--enable-ep-weight-filter`, round-robin expert 배치는
   테스트하지 않았다.
@@ -247,7 +259,7 @@ D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 �
 | 레이아웃 | 데모의 레이아웃(`--tensor-parallel-size 8 --pipeline-parallel-size 2 --distributed-executor-backend ray`)으로 체크포인트의 dense 사본(`/tmp/axk2-full-dense`, `make_dense_dir.py`로 생성)을 서빙한다. decode는 `TRITON_MLA`를, prefill은 FlashAttention-2 MLA를 사용한다. |
 | Job | `verify-remaining-nd96-hub.yml`, phase `dense-pp2`(`IB_PROBE=1`, 컨텍스트 262,144, 시퀀스 64, 0.90, batched token 8,192). `native-dsa-bench-nd96-hub.yml`과 `full-native-dense-nd96-hub.yml`, `MODES="native dense"`에서 나온 phase `full-dense-tp8-pp2`(컨텍스트 65,536, 시퀀스 128, vLLM의 A100 기본값인 batched token 2,048). |
 | 시작 시간, KV cache | 8.1: 181 s, 766,032 토큰. 8.2: 171 s, 821,312 토큰(GPU당 weight 41.7 GiB, KV 26.8 GiB), TCP 사용. 8.3: 181 s, 843,920 토큰, TCP 사용. |
-| 측정값(지점당 단일 샘플) | 8.1, native TP8 x PP2와 같은 할당, tech report Fig. 7 조건(동시성 32, 출력 1,024 토큰): 1K부터 120K 입력까지 native total tok/s의 1.2-2.4x. 8.2: native output tok/s의 1.1-1.6x. 기능 6/6(8.2), tool 9/9(8.1). |
+| 측정값(지점당 단일 샘플) | 8.1, native TP8 x PP2와 같은 할당, tech report Fig. 7 조건(동시성 32, 출력 1,024 토큰): 1K부터 120K 입력까지 native total tok/s의 1.2-2.4x. 8.2: native output tok/s의 1.1-1.6x. 두 측정 모두 같은 seed로 인한 prefix cache 재사용이 섞여 이 비율은 재측정 전까지 사용하지 않는다(설계 문서 8.1 정정). 기능 6/6(8.2), tool 9/9(8.1). |
 | 주의 사항 | 컨텍스트 2,048 토큰까지만 정확하다(설계 문서 5). needle은 60K 토큰까지(8.2에서 12/12)와 32K에서(8.1에서 3/3) 찾았지만, 126K나 253K 토큰에서는 하나도 찾지 못했다(8.1에서 0/6). 더 긴 컨텍스트에는 native DSA를 사용한다. |
 
 ### `dense-tp16`: FP8 dense 모드, 두 노드에 걸친 TP16 (설계 문서 8.1)
@@ -258,7 +270,7 @@ D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 �
 | 레이아웃 | `--tensor-parallel-size 16 --pipeline-parallel-size 1 --distributed-executor-backend ray`, dense 체크포인트 |
 | Job | `verify-remaining-nd96-hub.yml`, phase `dense-tp16`(컨텍스트 32,768, 시퀀스 64, 0.90, batched token 8,192, `IB_PROBE=1`) |
 | 시작 시간, KV cache | 241 s, 362,848 토큰 |
-| 측정값(지점당 단일 샘플) | 같은 할당의 `dense-pp2` 대비, 동시성 32, 출력 1,024 토큰: total tok/s가 1K 입력에서 1.41x, 4K에서 1.20x, 8K에서 1.12x(1,386 / 2,638 / 3,449 대 980 / 2,202 / 3,070). 기능 4/4. |
+| 측정값(지점당 단일 샘플) | 같은 할당의 `dense-pp2` 대비, 동시성 32, 출력 1,024 토큰: total tok/s가 1K 입력에서 1.41x, 4K에서 1.20x, 8K에서 1.12x(1,386 / 2,638 / 3,449 대 980 / 2,202 / 3,070). 4K·8K 값은 같은 seed로 인한 prefix cache 재사용이 섞였다. 기능 4/4. |
 | 주의 사항 | KV cache가 `dense-pp2` 토큰 수의 0.47x만 담는다. 따라서 이 레이아웃은 짧은 컨텍스트에만 적합하다. dense 모드의 모든 주의 사항이 적용된다. |
 
 ### `dense-tp16-eagle3`: EAGLE3 drafter를 사용한 TP16 (설계 문서 8.1)
@@ -289,7 +301,7 @@ D(NVFP4) 대비 비율이다. 입력은 1K / 8K / 32K 토큰, 출력은 1,024 �
 | 레이아웃 | `demo-nvfp4` 레이아웃(`--tensor-parallel-size 8 --distributed-executor-backend mp`, `--max-model-len -1`, 시퀀스 128, 0.92)에 `--max-num-batched-tokens 2048`을 쓰고 priority 스케줄링을 쓰지 않는다 |
 | Job | `nvfp4-a100-nd96.yml`, phase `nvfp4-tp8-b2048`. 같은 할당에서 phase `nvfp4-tp8`(batched token 8,192) 다음에 실행한다(`FULL_REPO=skt/A.X-K2-NVFP4`, `NVFP4_SM80_PORT=1`) |
 | 시작 시간, KV cache | 352 s, 272,960 토큰(GPU당 19.91 GiB). 따라서 262,144 토큰 전체 컨텍스트가 들어간다. batched token 8,192개에서는 433 s, 254,016 토큰이다. |
-| 측정값(지점당 단일 샘플) | 같은 할당의 `nvfp4-tp8` 대비, 설계 문서 8.4의 출력 256 토큰 지연 시간 계획 기준: output tok/s 0.97-1.07x. 1K 요청 하나의 median TPOT는 19.0 ms 대 20.4 ms. 1K 입력, 동시성 128에서 output tok/s 655 대 673. |
+| 측정값(지점당 단일 샘플) | 같은 할당의 `nvfp4-tp8` 대비, 설계 문서 8.4의 출력 256 토큰 지연 시간 계획 기준: output tok/s 0.97-1.07x(두 phase 모두 모든 지점에 같은 seed를 써서 prefix cache 재사용이 섞였다. 재측정 전까지 사용하지 않는다). 1K 요청 하나의 median TPOT는 19.0 ms 대 20.4 ms. 1K 입력, 동시성 128에서 output tok/s 655 대 673. |
 | 주의 사항 | vLLM은 A100에서 기본으로 batched token 2,048개를 사용한다. 데모와 expert-parallel 비교는 tech report의 B200 설정인 8,192를 사용한다. 설계 문서 8.2의 이전 FP8 표는 2,048을 사용했다. |
 
 ### 2-layer cut: 정확성 리허설 (설계 문서 7, 8.2, 8.3)

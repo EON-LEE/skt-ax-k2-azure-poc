@@ -78,6 +78,26 @@ class FigureDataTests(unittest.TestCase):
             for name in [n for n in expected if n.endswith(".png")]:
                 self.assertLess((out / name).stat().st_size, 400_000)
 
+    def test_throughput_tables_carry_review_caveats(self):
+        """2026-11-09 review: prefix-cache-tainted points are flagged, cost is marked superseded, low priority is gone."""
+        self.assertNotIn("low_priority", make_figures.PRICE_METERS)
+        base = REPORT / "figures"
+        with tempfile.TemporaryDirectory(prefix="_test_tables_", dir=base) as tmp:
+            make_figures.write_tables(make_figures.load_throughput(), Path(tmp))
+            text = (Path(tmp) / "throughput-tables.md").read_text(encoding="utf-8")
+        self.assertIn("| 1K | 1,900 | 815 | 0.43 | 980 | 0.52 |", text)
+        self.assertIn("| 8K | 4,800 | 2,424† | 0.51† | 3,070† | 0.64† |", text)
+        self.assertIn("| 16K | 6,300 | 2,275 | 0.36 | 3,637 | 0.58 |", text)
+        self.assertIn("B200 대비 1K 0.43, 8K 0.39, 32K 0.25", text)
+        self.assertIn("| 4K | 450 | 106† | 138† | 210 | 1,200 |", text)
+        self.assertIn("그림에 표시되지 않은 가정", text)
+        self.assertIn("| C128, 1K in, 256 out | FP8 2 nodes | 28.01 | 17.93 | 12.32 | 8.82 |", text)
+        self.assertIn("재측정 전까지 사용하지 않는다", text)
+        self.assertIn("2026-03-31부터 Spot", text)
+        self.assertNotIn("| Low priority |", text)
+        self.assertIn("](../REVIEW_2026-11-09.md)", text)
+        self.assertTrue((REPORT / "REVIEW_2026-11-09.md").is_file())
+
 class BenchmarkTests(unittest.TestCase):
     def evidence(self, folder):
         path = Path(folder) / "a100-benchmarks.json"

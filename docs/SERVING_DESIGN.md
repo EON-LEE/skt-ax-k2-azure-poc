@@ -4,6 +4,7 @@
 "blocked" 결론을 대체한다. 각 단계의 결과는 8절과 `evidence/`에 있다.
 [VLLM_CONFIGS.md](VLLM_CONFIGS.md)는 이 문서에서 서빙한 모든 vLLM 구성을
 데모의 운영 상태와 함께 하나의 카탈로그로 모은다.
+2026-11-09 검토에서 정정한 내용과 남은 한계는 [검토 보고서](report/REVIEW_2026-11-09.md)에 있다.
 
 ## 1. 방법 검토: 이전 접근의 문제
 
@@ -154,9 +155,17 @@ XPU, DeepGEMM, Triton 순서로 병합했다. guard 하나를 추가했다.
 PR은 Hopper도 쓰는 우선순위 목록에서 `TRITON_MLA_SPARSE`를 `FLASHMLA_SPARSE`보다 앞에
 두었다. 그래서 이제 이 backend는 SM90/SM100을 거부하고, 이들은 native 커널을
 유지한다. `aml/src/dsa_port.json`은 그 결과를 기록한다. 여기에는 PR 커밋에서
-다운로드하고 해시를 확인한 새 파일 5개와, 수정된 파일 5개에 대한 정확한 context
-diff가 있으며, 각 diff에는 예상 before-hash와 after-hash가 있다. v0.23 + fork 파일에
-오프라인으로 적용하면 이 포트는 병합된 git tree와 바이트 단위로 동일하다.
+다운로드하고 해시를 확인한 새 파일 5개와, 수정된 파일 6개에 대한 정확한 context
+diff가 있으며, 각 diff에는 예상 before-hash와 after-hash가 있다. 여섯 번째 파일은 PR의 새 파일
+`vllm/v1/attention/ops/mqa_logits_triton.py`에 2026-11-09 버그 수정을 더한 것이다(아래 참고). 이 수정을 빼면
+v0.23 + fork 파일에 오프라인으로 적용한 포트는 병합된 git tree와 바이트 단위로 동일하다.
+
+**버그 수정 (2026-11-09).** PR의 paged 디코드 indexer kernel은 행 너비가 64의 배수가 아닐 때 다음 요청의 행이나
+tensor 끝 너머에 −inf를 쓸 수 있었다. 수정한 kernel은 저장을 행 너비 안으로 제한한다. 확인은 CPU의 Triton
+interpreter로만 했다. 수정 전에는 행 밖에 56-112개 값을 썼고, 수정 후에는 하나도 쓰지 않았으며, 행 안의 값은
+비트 단위로 같았다. CUDA 회귀 테스트(`aml/src/bench/test_dsa_port_regression.py`)는 아직 GPU에서 실행하지 않았다.
+수정은 이 변경 이후의 실행부터 적용된다. 지금까지 기록한 결과는 모두 수정 전 kernel로 실행했다. 버그가 그
+결과에 준 영향은 확인하지 않았다(처리량, 기능·tool 점검에서는 드러나지 않았다).
 
 v0.23과의 상호작용 확인 결과는 다음과 같다.
 
@@ -201,10 +210,10 @@ BF16 KV-cache 기본값으로 서빙한다. 이 레퍼런스와의 모든 차이
 | Context 길이 | 추가 플래그 없이 256K | `max_model_len` 262,144. SKT의 needle 테스트 252,728 토큰까지 9/9(native) | Dense 모드는 126K 또는 253K 토큰에서 needle을 하나도 찾지 못함 |
 | Loader 및 한도 | `fastsafetensors`, 시퀀스 64개 | 기본 loader. 시퀀스 64개. 스텝당 batched 토큰 8,192개로 vLLM의 B200 기본값(A100 기본값은 2,048) | 로드 시간에만 영향 |
 | 결정성 | 기본적으로 batch-invariant 아님 | 같음. 그리고 A100에서는 batch-invariant 모드를 시작할 수 없음: 이를 지원하는 SM80용 FP8 MoE 커널이 없음(8.1) | 동일한 greedy 요청이 68-264자 이후 갈라짐 |
-| Speculative decoding | `skt/A.X-K2-EAGLE3` drafter: tech report Fig. 8 기준 +23-30% | 사용 불가: EAGLE3는 PP와 함께 실행할 수 없고, TP16에서는 A100 MLA 디코드 커널이 multi-token draft를 검증할 수 없음(8.1) | A100에서는 속도 향상 옵션이 없음 |
-| 4-bit 가중치 | 4 x B200에서 `skt/A.X-K2-NVFP4`: routed expert가 FP4 tensor core에서 W4A4 | 이 2노드 배포에서는 사용하지 않음. 이 체크포인트는 upstream vLLM 변경을 backport한 뒤 A100 노드 1대에서 실행됨. 이때 expert는 W4A16으로 실행됨(8.4) | 1노드 NVFP4 옵션은 짧은 입력에서 거의 같은 속도로 GPU를 절반만 씀. 한계는 8.4에 정리 |
+| Speculative decoding | `skt/A.X-K2-EAGLE3` drafter: tech report 본문 기준 +23-30%(Fig. 8 막대 label로는 +11-30%, 4K +11%) | 사용 불가: EAGLE3는 PP와 함께 실행할 수 없고, TP16에서는 A100 MLA 디코드 커널이 multi-token draft를 검증할 수 없음(8.1) | A100에서는 속도 향상 옵션이 없음 |
+| 4-bit 가중치 | 4 x B200에서 `skt/A.X-K2-NVFP4`: routed expert가 FP4 tensor core에서 W4A4 | 이 2노드 배포에서는 사용하지 않음. 이 체크포인트는 upstream vLLM 변경을 backport한 뒤 A100 노드 1대에서 실행됨. 이때 expert는 W4A16으로 실행됨(8.4) | 1노드 NVFP4 옵션은 GPU를 절반만 쓰고, 같은 날 측정(8.7)에서 FP8 2노드의 0.83-1.10x였음. 한계는 8.4에 정리 |
 | 품질 근거 | SKT가 공개한 평가 | 기능 probe, 253K 토큰까지의 needle, tool call, 2-layer log-probability 비교 | 벤치마크 동등성은 측정하지 않음 |
-| 속도 | Tech report Fig. 7: B200 노드 1대, 동시성 32, 출력 1K | 16 A100에서 같은 벤치마크: 1K-8K 입력에서 B200 노드의 0.43-0.51x, 16K-120K에서 0.10-0.36x(native) | 짧은 입력에서 GPU당 B200 throughput의 약 4분의 1. 긴 입력에서는 더 낮음. 1노드 NVFP4 옵션은 GPU당 약 절반에 도달함(8.4) |
+| 속도 | Tech report Fig. 7: B200 노드 1대, 동시성 32, 출력 1K | 16 A100에서 같은 벤치마크: B200 노드의 0.43x(1K 입력), 0.39x(8K 입력, 2026-10-21 재측정 환산), 16K-120K에서 0.10-0.36x(native). 8.1의 2K-8K 값(0.43-0.51x)은 prefix cache 재사용으로 부풀었다(8.1 정정) | 짧은 입력에서 GPU당 B200 throughput의 약 5분의 1. 긴 입력에서는 더 낮음. 1노드 NVFP4 옵션은 GPU당 약 절반에 도달함(같은 날 D 기준 1K 0.47x. 8.4의 값은 같은 seed 측정) |
 
 **체크포인트 revision.** `skt/A.X-K2`의 Hub 이력이 재작성되었다.
 revision 2287ca45는 2026-10-20에 404를 반환했고, `main`의 커밋 17개 중에도 없다.
@@ -233,8 +242,10 @@ temperature가 0.6에서 0.9로 바뀐다. 그래서 데모는 서빙 기본값�
   없다.
 - KV cache와 context: batched 토큰 8,192개에서는 254,016 토큰이므로
   context가 그 값으로 auto-fit된다. 2,048개에서는 272,960 토큰이므로 전체 262,144가 들어간다.
-- 속도: 동시성 32까지는 16 A100의 FP8 체크포인트만큼 빠르고,
-  64-128에서는 0.81-0.86x이며, 프리필은 더 느리다.
+- 속도: 같은 날 측정(8.7)에서 FP8 16장의 0.83-1.10x였다. 이 범위에는 KV에 막힌 concurrency 32의 8K·32K 지점이
+  포함되고, NVFP4는 다른 플래그(GPU 메모리 0.92, 최대 시퀀스 128)로 실행했다. 8.4의 "동시성 32까지 같은 속도"(1K 입력,
+  1.01-1.06x)와 64-128의 0.81-0.86x는 다른 날짜·리전·연결의 FP8 값과 맞댄 교차 비교이고, 두 작업 모두 같은 seed로
+  prefix cache 재사용이 섞여 재측정 전까지 사용하지 않는다. 프리필은 더 느리다.
 
 ## 6. 구독 정책 제약(MCAPS)
 
@@ -298,9 +309,9 @@ Spot 할당 하나에서 실행했다. 전체 모델을 여섯 가지 구성으�
 | 같은 테스트, dense | 32K에서 3/3, 128K와 256K에서 **0/6** |
 | 결정성, 기본 kernel | 동일한 greedy 요청이 68-264자 뒤에 갈라진다 |
 | Batch-invariant 모드 | **A100에서 시작할 수 없다** |
-| 기술 보고서 Fig. 7 조건, native | 1K-8K 입력에서 B200 노드 1개의 0.43-0.51x, 16K-120K에서 0.10-0.36x |
-| 두 노드에 걸친 TP16, dense | 1K-8K 입력에서 TP8 x PP2보다 12-41% 빠르다. KV cache는 절반이다 |
-| EAGLE3 drafter | 사용할 수 없다: CUDA graph 시작이 실패한다. eager fallback은 4-5배 느리고 step당 1.05 token을 수락한다 |
+| 기술 보고서 Fig. 7 조건, native | 1K-8K 입력에서 B200 노드 1개의 0.43-0.51x, 16K-120K에서 0.10-0.36x. 2K-8K 값은 prefix cache 재사용으로 부풀었다(아래 정정) |
+| 두 노드에 걸친 TP16, dense | 1K-8K 입력, concurrency 32의 total tok/s가 dense TP8 x PP2보다 12-41% 높았다(4K·8K는 cache 재사용이 섞임). KV cache는 절반이다. native TP16은 8.7 참조 |
+| EAGLE3 drafter | 사용할 수 없다: CUDA graph 시작이 실패한다. eager fallback은 CUDA graph를 쓴 TP16보다 4.3-5.3배 느리고 step당 1.05 token을 수락한다 |
 | NVFP4 checkpoint | 여기서는 시도하지 않았고, 불가능하다고 잘못 기술했다: A100 노드 1개에서 실행된다 (8.4) |
 
 **InfiniBand.** 작업 컨테이너는 각 노드의 200 Gb/s InfiniBand HCA 8개를
@@ -377,6 +388,16 @@ configuration" 오류로 시작에 실패한다 (`fused_moe/oracle/fp8.py:417`).
 충족하지 않는다. 따라서 attention 포트에 추가한 batch-invariance 연결은
 A100에서 도달할 수 없다.
 
+**정정 (2026-11-09): 같은 seed로 인한 prefix cache 재사용.** 이 작업의 Fig. 7 sweep, TP16, EAGLE3
+측정은 모든 측정점에 같은 seed(`--seed 2026`)를 썼다. vLLM의 random dataset은 seed만으로 prompt
+offset을 정한다. 그래서 뒤 측정점의 prompt i는 앞 측정점의 prompt i로 시작한다. prefix caching이 켜져 있어
+뒤 측정점이 앞 측정점의 cache block을 재사용했다. 같은 TP8 x PP2 native 구성을 측정점마다 다른 seed로
+다시 잰 2026-10-21 결과(8.7)와 비교하면, concurrency 32 출력은 1K에서 0.7% 안에서 같고 8K에서
+269 → 208 tok/s로 23% 낮다. 따라서 아래 표의 2K-8K 처리량과 그 비율(native, dense, TP16)은 재측정 전까지
+사용하지 않는다. 16K 이상은 KV cache가 앞 prompt를 밀어내 영향이 작은 것으로 본다(추정). 요청 1개의
+TPOT는 디코드만 재므로 영향이 없다. 2026-10-21 값으로 환산한 B200 대비 비율은 1K 0.43x, 8K 0.39x,
+32K 0.25x다. 8.2와 8.4의 2026-10-03·10-04 측정도 같은 방식이라 같은 문제가 있다.
+
 **기술 보고서 조건에서의 속도.** 기술 보고서 Fig. 7은 B200 노드 1개(GPU 8개)에서
 vLLM bench serve를 측정한다. 조건은 random dataset, concurrency 32, 출력
 token 1,024개, FP8 weight, BF16 KV cache다. 여기서는 같은 client 명령을
@@ -394,10 +415,11 @@ token 1,024개, FP8 weight, BF16 KV cache다. 여기서는 같은 client 명령�
 | 65,536 | 10,600 | 1,535 | 0.14 | 3,242 | 0.31 | 10 / 11 |
 | 120,000 | 12,300 | 1,184 | 0.10 | 2,802 | 0.23 | 5 / 6 |
 
-- **8K 입력까지는 A100 16개가 B200 노드 1개의 약 절반을 낸다.** GPU당으로는
-  약 4분의 1이다. A100에는 FP8 tensor core가 없다. 그래서 FP8 weight는
+- **8K 입력까지는 A100 16개가 B200 노드 1개의 0.4배 안팎을 낸다(오염 없는 값: 1K 0.43x, 8K 0.39x).**
+  GPU당으로는 약 5분의 1이다. A100에는 FP8 tensor core가 없다. 그래서 FP8 weight는
   Marlin W8A16 kernel로 실행된다. Concurrency 32의 디코드는 MoE weight 읽기에
-  묶여 있다: native median TPOT는 72-109 ms다. B200 수치로 추정하면 약
+  묶여 있는 것으로 보인다(프로파일링하지 않음): native median TPOT는 72-109 ms다(8K의 109 ms는
+  cache 재사용이 섞인 값이고, 2026-10-21에는 143 ms였다). B200 수치로 추정하면 약
   33 ms다.
 - **16K부터는 두 가지 이유로 격차가 커진다.**
   - *KV 용량.* MLA cache는 모든 tensor-parallel rank에 복제된다.
@@ -410,7 +432,7 @@ token 1,024개, FP8 weight, BF16 KV cache다. 여기서는 같은 client 명령�
     실행되고, 모든 TP rank에 복제된다. 그 프리필 비용은 입력 길이의 제곱으로
     늘어난다.
 - **Dense는 모든 길이에서 native보다 1.2-2.4배 빠르다.** 그러나 긴 context
-  검색에는 실패한다 (위 참조).
+  검색에는 실패한다 (위 참조). 2K-8K의 비율에는 위 정정의 cache 재사용이 섞였다.
 - **곡선의 모양이 다르다.** Total tok/s는 prompt token을 포함한다. 그래서
   FP8 프리필이 빠른 B200에서는 120K 입력까지 계속 오른다. A100에서는
   indexer의 프리필 비용과 KV 한도 때문에 8K-16K에서 정점을 찍은 뒤
@@ -426,9 +448,12 @@ pipeline stage 하나를 실행한다. Tensor-parallel all-reduce는 InfiniBand�
 | 4,096 | 2,202 | 2,638 (0.73x) | 595 | 1.11 |
 | 8,192 | 3,070 | 3,449 (0.72x) | 643 | 1.23 |
 
-- **짧은 입력에서 TP16은 TP8 x PP2보다 12-41% 빠르다.** 그 KV cache는
+- **짧은 입력에서 dense TP16의 total tok/s는 dense TP8 x PP2보다 12-41% 높았다.** 다만 4K·8K 값에는
+  위 정정의 cache 재사용이 섞였다. native layout끼리 같은 할당에서 다시 잰 8.7에서는 TP16이 요청 1개에서
+  0.77-0.82x, concurrency 32에서 1K·8K 1.04x, 32K 0.89x였다. 그 KV cache는
   362,848 token을 담는다. 이는 PP2의 절반이므로 짧은 context에만 적합하다.
-- **EAGLE3는 A100에서 이 스택을 빠르게 할 수 없다.**
+- **EAGLE3로 이 스택이 빨라지는 것을 A100에서 확인하지 못했다.** CUDA graph 시작이 실패해 eager로만
+  측정했고, 기준 TP16은 CUDA graph를 썼다.
   - Drafter는 layer 2, 30, 58의 hidden state가 필요하다. 이 layer들은 두 PP
     stage에 걸쳐 있다 (5c).
   - TP16에서 CUDA graph를 사용한 시작은 `assert m.max_query_len <=
@@ -437,9 +462,9 @@ pipeline stage 하나를 실행한다. Tensor-parallel all-reduce는 InfiniBand�
     선언한다 (`query_len_support` SINGLE_ONLY). 초안 token 3개를 검증하려면
     4-token query가 필요하고, 이는 MLA 프리필 경로로 fallback된다.
   - Eager fallback은 올바르게 서빙했다 (기능 검사 4/4). 그러나 drafter 없이
-    CUDA graph로 실행한 TP16보다 4-5배 느렸다.
+    CUDA graph로 실행한 TP16보다 4.3-5.3배 느렸다(eager 손실 포함).
   - Step당 1.05 token을 수락했다: 초안 token의 1.5%이고, 첫 위치에서는
-    2-5%다. 기술 보고서는 같은 유형의 benchmark에서 B200 기준 2.24를 제시한다.
+    2-4%다(로그 표본 4개). 기술 보고서는 같은 유형의 benchmark에서 B200 기준 2.24를 제시한다.
     그 수락률이라 해도 192 ms step은 token당 86 ms가 된다. 이는 일반 TP16의
     43 ms의 두 배다. 그래서 낮은 수락률은 더 조사하지 않았다.
   - Fig. 8의 막대 label은 이 길이들에서 Fig. 7 대비 +11%에서 +26%를 제시한다.
@@ -458,7 +483,8 @@ pipeline stage 하나를 실행한다. Tensor-parallel all-reduce는 InfiniBand�
 **비용.** 두 노드를 약 4.7시간 점유했다. 중복된 italynorth 할당은 약 6분
 점유했다. 따라서 합계는 약 9.6 node-hour다. 이는 low-priority 요금으로 약
 USD 80, Spot 요금으로 약 USD 125다 (node-hour당 USD 8.19 또는 12.89.
-on demand는 USD 40.96이다). GPU cluster는 21:45Z에, resource group은
+on demand는 USD 40.96이다). low-priority는 2026-03-31부터 Spot으로 과금되므로(2절) Spot 기준 약
+USD 125로 본다. GPU cluster는 21:45Z에, resource group은
 22:04Z에 삭제했다.
 
 ### 8.2 같은 할당에서 native DSA와 dense 비교 (2026-10-03, italynorth)
@@ -486,7 +512,7 @@ Transformers 구현(FP32, sparse DSA)과 14,618개 prompt 위치에서 비교했
 | --- | ---: | ---: | ---: |
 | Native DSA, 노드 1개 TP8 | 0.0116 | **0.0111** | 0.13 |
 | Native DSA, 노드 2개 TP8 x PP2 | 0.0120 | **0.0115** | - |
-| Dense, 노드 1개 TP8 | 0.0116 | 0.0123 | 0.22 |
+| Dense, 노드 1개 TP8 | 0.0116 | 0.0123 | 0.23 |
 
 `index_topk` 이내에서는 두 모드가 같은 함수를 계산한다. 0.0116은 BF16 대
 FP32의 하한이다. 그 너머에서 native는 그 하한에 머물고 dense는 벗어난다.
@@ -514,7 +540,9 @@ FP32 CPU reference에서 실행할 수 없다.
 결과다. 같은 유형의 문제는 reasoning 모드에서 정답을 냈다.
 
 아래 속도 결과는 random-token prompt, 출력 token 256개, `--ignore-eos`로
-실행한 `vllm bench serve`에서 나온다.
+실행한 `vllm bench serve`에서 나온다. 모든 측정점에 같은 seed(2026)를 써서 뒤 측정점이 앞 측정점의
+prompt를 cache에서 재사용했다(8.1 정정). 따라서 요청 1개의 8K·32K 입력 TTFT와 출력 tok/s, concurrency 8
+이상의 값, 두 모드의 비율은 재측정 전까지 사용하지 않는다. 요청 1개의 TPOT는 영향이 없다.
 
 | 시나리오 | Native: 출력 tok/s | Native: median TTFT | Native: median TPOT | Dense: 출력 tok/s | Dense: median TTFT | Dense: median TPOT |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -532,10 +560,12 @@ FP32 CPU reference에서 실행할 수 없다.
 
 - **Native는 학습된 sparse-attention 규칙을 유지한다** (query당 상위 2048개
   key). 이를 대체 kernel로 계산한다. Token당 디코드 비용은 context 1K에서
-  32K token까지 거의 일정하다 (19.2에서 21.1 ms). 이는 설계대로다.
+  32K token까지 19.2에서 21.1 ms로 10% 늘었다. 같은 작업의 dense(15.8에서 19.1 ms)보다
+  모든 길이에서 길다. 원인은 프로파일링하지 않았다.
   포트는 아직 최적화되지 않은 Triton이다. PR 작성자는 이를
   "a concept"라고 부른다.
-- **A100에서 dense는 10-60% 빠르다.** 프리필은 성숙한 FlashAttention-2
+- **A100에서 dense는 이 작업의 10개 조건 모두에서 출력 tok/s가 높았다.** 다만 위의 cache 재사용이
+  두 모드에 섞여 있어 배수(11-64%)는 재측정 전까지 사용하지 않는다. 프리필은 성숙한 FlashAttention-2
   경로를 사용한다. 이 context 길이에서는 디코드 attention 비용이 작다.
   디코드 비용은 context에 따라 늘어난다 (15.8에서 19.1 ms). 그래서 격차가
   줄어든다. Dense는 context token 2,048개까지만 정확하다.
@@ -557,7 +587,7 @@ FP32 CPU reference에서 실행할 수 없다.
 
 | vLLM 구성 | Pearson | 평균 절대 차이 | Top-1 일치율 |
 | --- | --- | --- | --- |
-| 단일 노드, TP8 | 0.99995-0.999996 | 0.008-0.013 | 97-100% |
+| 단일 노드, TP8 | 0.99995-0.999996 | 0.008-0.013 | 96-100% |
 | 노드 2개, TP8 x PP2 | 0.99998-0.999996 | 0.008-0.013 | 93-100% |
 
 이는 BF16 activation과 FP32 reference 사이에서 예상되는 일치 수준이다. 노드
@@ -663,7 +693,10 @@ checkpoint의 expert는 NVFP4를 선언한다.
 
 **16 A100의 FP8 checkpoint 대비 속도.** 명령은 8.2 표의 명령과 같다. 8.2는
 batched token 2,048개로 16 A100(TP8 x PP2, TCP 경유)에서 FP8 checkpoint를
-서빙했다. 아래 NVFP4 수치도 같은 설정을 사용한다.
+서빙했다. 아래 NVFP4 수치도 같은 설정을 사용한다. FP8 수치는 2026-10-03 이탈리아 북부·TCP 작업(8.2),
+NVFP4 수치는 2026-10-04 영국 남부 작업이다. 날짜·리전·할당이 다른 교차 비교다. 두 작업 모두 같은 seed로
+cache 재사용이 섞였다(8.1 정정). 같은 날(2026-10-21, 8.7) 측정에서 NVFP4 TP8은 FP8 TP8 x PP2의
+0.83-1.10x였다.
 
 | 시나리오 | NVFP4, 8 A100: 출력 tok/s | Median TTFT | Median TPOT | FP8, 16 A100: 출력 tok/s | Median TTFT | Median TPOT | 출력 비율 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -682,7 +715,10 @@ Batched token 8,192개에서는 디코드가 약간 느렸다 (1K 요청 1개의
 모두 들어 있다.
 
 **기술 보고서 Fig. 7 조건에서** (concurrency 32, 출력 token 1,024개,
-batched token 8,192개, 8.1과 같음):
+batched token 8,192개, 8.1과 같음). "16 A100의 FP8 대비" 열은 2026-10-03 작업(8.1)과의 교차 비교다.
+그 FP8 값의 2K-8K는 cache 재사용으로 부풀었다. 같은 FP8 구성의 8K·concurrency 32 출력은 2026-10-21
+재측정에서 23% 낮았고(269 → 208 tok/s), 같은 날 비교에서 NVFP4는 8K에서 0.90x다. 이 2026-10-04 NVFP4 작업도
+모든 측정점에 같은 seed를 썼다. 그래서 이 절의 NVFP4 처리량·TTFT와 모든 비율은 재측정 전까지 사용하지 않는다:
 
 | 입력 token | NVFP4, 8 A100: total tok/s | Median TTFT | 최대 실행 중 요청 | B200 노드 1개 대비 | 16 A100의 FP8 대비 | GPU당, 16 A100의 FP8 대비 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -690,12 +726,12 @@ batched token 8,192개, 8.1과 같음):
 | 2K | 1,309 | 6.5 s | 32 | 0.48x | 1.12x | 2.25x |
 | 4K | 1,683 | 14.1 s | 32 | 0.47x | 0.99x | 1.98x |
 | 8K | 1,703 | 23.0 s | 30 | 0.35x | 0.70x | 1.41x |
-| 16K | 1,875 | 163 s | 15 | 0.30x | 0.82x | 1.65x |
+| 16K | 1,874 | 163 s | 15 | 0.30x | 0.82x | 1.65x |
 | 32K | 1,674 | 317 s | 7 | 0.20x | 0.87x | 1.73x |
 
 B200 노드도 GPU가 8개다. 따라서 "B200 노드 1개 대비" 열은 GPU당 비율이기도
-하다: 1K-4K 입력에서 약 절반이다. 16 A100의 FP8 checkpoint는 0.21-0.24다
-(8.1).
+하다: 1K-4K 입력에서 약 절반이다(같은 seed 측정. 같은 날 D 기준 1K는 0.47x(889.8/1,900)로 역시 약 절반이다).
+16 A100의 FP8 checkpoint는 0.21-0.24다(8.1. 2K·4K 값은 cache 재사용으로 부풀었다).
 
 **출력 token 100만 개당 비용.** 측정한 처리량과 uksouth의
 Standard_ND96amsr_A100_v4 Azure 소매 가격을 사용했다. Node-hour당 USD로: on
@@ -710,14 +746,23 @@ demand 40.96, 1년 예약 26.22, 3년 예약 18.02, Spot 12.89, low priority 8.1
 Batched token 8,192개에서는 두 번째 NVFP4 셀이 FP8보다 40% 낮다
 (on demand 16.90).
 
-**의미.**
+**정정 (2026-11-09).** 이 비용 표는 기록으로만 남기고 재측정 전까지 사용하지 않는다. FP8 처리량은
+concurrency 32 행이 8.1(2026-10-03 영국 남부 IB), concurrency 128 행이 8.2(2026-10-03 이탈리아 북부 TCP)
+작업의 값이고, NVFP4는 2026-10-04 작업의 값이다. 서로 다른 작업의 교차 비교이며, concurrency 128 행의
+두 처리량에는 같은 seed로 인한 cache 재사용이 섞였다(8.1 정정). Low priority 값은 2026-03-31부터 Spot으로
+과금되므로(2절) 적용되지 않는 이전 요율이다. 토큰당 비용은 지연 기준(SLO)을 지키는 처리량을 반복 측정한 뒤
+다시 계산한다([검토 보고서](report/REVIEW_2026-11-09.md) 8절).
+
+**의미.** 아래 원인 설명은 해석이며 프로파일링하지 않았다.
 
 - 낮거나 중간 수준의 concurrency에서 디코드는 weight 읽기에 제한된다. 그
   바이트 대부분은 routed expert다. NVFP4는 이를 절반으로 줄인다. 그래서
-  8 A100이 FP8 checkpoint의 16 A100만큼 빠르게 디코드한다: concurrency
-  1-32에서 출력 tok/s가 1.01-1.06x다.
+  8 A100이 FP8 checkpoint의 16 A100과 비슷한 속도로 디코드한다: 같은 날 측정(8.7)에서 1K·8K 요청 1개의
+  출력 tok/s가 1.01-1.02x였다. 위 교차 비교의 concurrency 1-32 값(1K 입력 1.01-1.06x)은 같은 seed 측정이라
+  재측정 전까지 사용하지 않는다.
 - 처리 중인 요청이 많아지면 compute와 attention이 지배한다. 그러면 절반으로
-  줄어든 GPU 수가 드러난다: concurrency 64에서 0.86x, 128에서 0.81x다.
+  줄어든 GPU 수가 드러난다: 교차 비교에서 concurrency 64는 0.86x, 128은 0.81x였다(같은 seed 측정,
+  재측정 전까지 사용하지 않는다).
 - 프리필은 compute-bound다. A100에는 FP8 tensor core도 FP4 tensor core도 없다.
   그래서 어느 checkpoint든 프리필은 BF16 산술이고, 여기서는 GPU가 절반이다.
   32K-token prompt 하나는 첫 token까지 11.6 s를 기다린다. FP8에서는 7.2 s다.
@@ -745,7 +790,8 @@ NVFP4는 테스트하지 않았다.
 italynorth도 각각 노드 하나를 할당했고, watcher가 몇 분 안에 둘 다 삭제했다.
 uksouth 노드는 약 2.1시간 실행했다. 따라서 이 실행은 최대 약 2.4
 node-hour를 사용했다: low-priority 요금으로 약 USD 20, Spot 요금으로 약
-USD 31이다. GPU cluster는 15:36Z에, resource group은 15:51Z에 삭제했다.
+USD 31이다. low-priority는 2026-03-31부터 Spot으로 과금되므로 Spot 기준 약 USD 31로 본다.
+GPU cluster는 15:36Z에, resource group은 15:51Z에 삭제했다.
 
 ## 8.5 이중 모델 상시 demo profile
 
@@ -1281,8 +1327,10 @@ baseline은 같은 할당에서 다시 측정했다. 따라서 8.1의 TP16 dense
   EP group은 한 stage의 rank를 DP, PCP, TP 전체에 걸쳐 묶는다(`parallel_state.py`,
   rank 순서 ExternalDP x DP x PP x PCP x TP). 따라서 "TP16 + EP16"은 스위치를 켠 TP16이다.
   TP8 x PP2는 각 stage에서 EP8이 되고, DP2 x TP8은 EP16이 되며, 1노드 TP8은 EP8이 된다.
-- 256개의 routed expert만 이동한다. attention은 TP(또는 DP) layout을 유지하고, shared
-  expert는 TP로 분할된 상태를 유지한다. 기본 linear 배치에서 EP rank r은
+- 256개의 routed expert만 이동한다. attention은 TP(또는 DP) layout을 유지한다. shared expert는 DP = 1인
+  layout(B, C1, E)에서 TP로 분할된 상태를 유지한다. DP2 x TP8 + EP(C2)에서는 sequence-parallel MoE가 켜져
+  shared expert를 GPU마다 통째로 복제한다(2026-11-09 검토, vLLM 소스로 확인). 증거 JSON의
+  `how_vllm_0_23_forms_ep.unchanged_by_ep` 문장은 C2에 대해 틀렸다. 기본 linear 배치에서 EP rank r은
   expert r x 256/EP부터 (r+1) x 256/EP - 1까지를 소유한다. 실행 로그에는 EP16에서
   EP rank 8(두 번째 노드)이 expert 128-143을 소유한다고 기록되었다.
 - DP = 1이면 아무것도 dispatch하지 않는다. 모든 rank가 모든 token을 유지하고, 자기 expert를
@@ -1329,10 +1377,15 @@ baseline은 같은 할당에서 다시 측정했다. 따라서 8.1의 TP16 dense
 
 - TP16은 MLA cache를 16개 rank에 복제하고, 각 rank가 61개 layer 전체를 보유한다. 따라서
   A의 token 수의 0.46x만 유지한다.
-- DP2는 8-GPU replica마다 모든 layer의 attention weight를 유지한다. 그 결과 각 replica는
-  약 239K token을 보유하고, context는 238,656으로 줄어든다.
+- DP2는 GPU당 weight가 TP16보다 3.1 GiB 많다(46.4 대 43.3 GiB). 대부분(약 2.3 GiB)은 GPU마다 통째로
+  복제한 shared expert이고, attention을 TP8로 나눈 몫(약 0.35 GiB)과 embedding·LM head(약 0.25 GiB)가
+  나머지다(메커니즘은 vLLM 소스로 확인, 크기는 추정). weight 외 메모리도 약 2.1 GiB 더 쓴다. 그 결과 각
+  replica는 약 239K token을 보유하고, context는 238,656으로 줄어든다. 이전 판의 "replica마다 모든 layer의
+  attention weight를 유지하기 때문"이라는 설명은 불완전했다. TP16도 모든 layer를 보유한다.
 - 32K 입력과 concurrency 32에서 동시에 실행된 요청 수는 A와 C1이 20개, TP16 layout이
-  9개, C2가 14개(replica당 7개)였다.
+  9개, C2가 14개(두 엔진 합계. 엔진마다 32K 요청이 최대 7개 들어간다)였다.
+- healthy까지 걸린 시간은 layout의 특성으로 비교하지 않는다. phase마다 1회 측정했고,
+  실행 순서(A, B, C1, B0, C2)와 앞 phase가 남긴 compile·page cache의 영향을 받는다.
 
 **속도 (FP8).** 초당 출력 token 수이며, 괄호 안은 A 대비 비율이다.
 
@@ -1355,7 +1408,8 @@ TPOT 중앙값 / TTFT 중앙값. 32K, c32의 TPOT는 동시에 들어가는 요�
 | B0. TP16 | 26.2 / 0.35 | 70.1 / 5.7 | 26.9 / 2.3 | 137.3 / 9.3 | 28.2 / 12.7 | 143.1 / 261 |
 | C2. DP2 x TP8 + EP | 41.3 / 0.51 | 66.8 / 5.5 | 41.8 / 2.7 | 98.9 / 15.4 | 42.7 / 14.0 | 154.5 / 213 |
 
-**NVFP4, 1노드.** TP8 + EP(EP8, GPU당 expert 32개)는 442 s 대비 312 s 만에 시작했고
+**NVFP4, 1노드.** TP8 + EP(EP8, GPU당 expert 32개)는 D 다음에 실행해 312 s 만에 시작했고(D는 442 s.
+실행 순서와 cache 상태의 영향이라 layout의 특성으로 보지 않는다)
 4/4와 9/9를 통과했다. KV token 253,120개를 보유했고(TP8: 254,016), GPU당 weight는
 같은 48.5 GiB였다. 모든 측정점에서 더 느렸다. 출력 tok/s는 0.93-0.95x였고, TPOT와 TTFT는
 1.05-1.09x였다. 예를 들어 1K, c32에서 TPOT는 65.7 대비 69.2 ms였고, 8K,
@@ -1363,18 +1417,22 @@ c32에서 출력은 188 대비 175 tok/s였다.
 
 **결과.**
 
-- EP 단독으로는 한 번도 이득이 없었다. 다른 조건이 같은 layout에서 EP를 켜면
-  TP16에서 throughput이 6%(B vs B0), TP8 x PP2에서 8%(C1 vs A), 1노드
-  NVFP4에서 5-7% 줄었다. 요청 1개에서는 2노드에서 TPOT가 13-14%, 1노드에서 8% 늘었다.
+- EP 단독으로는 한 번도 이득이 없었다. 다른 조건이 같은 layout 3쌍(B vs B0, C1 vs A, E vs D)을 각각
+  1회 측정했다. EP를 켜면 concurrency 32에서 throughput이 TP16에서 6%, TP8 x PP2에서 8%, 1노드
+  NVFP4에서 5-7% 줄었고, 요청 1개에서는 각각 10-12%, 9-12%, 7% 줄었다. 요청 1개의 TPOT는 2노드에서
+  12-14%, 1노드에서 8% 늘었다. 18개 비교가 모두 1 미만이지만 독립 표본은 3쌍뿐이다.
 - 질문받은 layout인 TP16 + EP는 데모 layout보다 빠르지 않다. 요청 32개에서
   8K 입력까지 0.98x, 32K에서 0.83x에 그친다. 요청 1개에서는 1.4x 느리고,
   KV cache는 0.46x만 보유한다. TP16 자체가 요청 1개에서 TPOT를 24-26% 늘린다. 모든
-  layer의 all-reduce가 InfiniBand를 거치기 때문이다. group이 노드를 넘으면
-  custom all-reduce가 비활성화된다.
+  layer의 all-reduce가 InfiniBand를 거치기 때문으로 보인다(프로파일링하지 않음). group이 노드를 넘으면
+  custom all-reduce가 비활성화된다는 로그는 확인했다. 단일 엔진이 매 step 다른 노드의 worker에
+  scheduler 출력을 보내는 control-plane 지연도 원인 후보다.
 - DP2 x TP8 + EP는 부하 상태에서 데모 layout을 이긴 유일한 EP layout이다. 1K, 8K,
   32K에서 출력 tok/s가 1.12x, 1.36x, 1.18x였고, 8K에서 TPOT는 0.69x였다. 대가로 단일
   요청의 TPOT가 약 2x, 8K와 c32의 TTFT가 1.56x가 되고, context가 262,144 대신
-  238,656이 된다.
+  238,656이 된다. 이 비교에는 다른 조건이 섞였다: C2만 API server 2개로 돌았고, 엔진별 한도
+  (batched token 8,192, sequence 64)가 엔진마다 적용되어 전체 한도가 2배였으며, 마지막에 실행했다.
+  EP 없는 TP16(B0)도 1K·8K에서 1.04x였다. 5% 이하 차이는 1회 측정으로 구별하지 않는다.
 - SKT가 장문 context 평가에서 hang이 발생해 피했던 DP/EP lock-step(1절)은
   여기서 hang이 나지 않았다. 다만 32K까지의 입력만 시험했다.
 
@@ -1382,13 +1440,20 @@ c32에서 출력은 188 대비 175 tok/s였다.
 비율을 읽는다. TP는 활성화된 모든 expert를 전체 rank에 나눠 자른다. EP는 routing이
 고른 rank에 expert를 통째로 준다. 따라서 한 step은 가장 바쁜 rank를 기다린다.
 이 불균형이 일정한 EP 손실을 설명할 수 있다. rank별 expert 부하는 측정하지 않았고,
-EPLB(redundant expert를 쓰는 `--enable-eplb`)도 시도하지 않았다. C2가 부하 상태에서
+EPLB(redundant expert를 쓰는 `--enable-eplb`)도 시도하지 않았다. 2026-11-09 검토는 A.X K2의 그룹
+라우팅(8그룹 중 4그룹 선택)과 기본 linear 배치가 겹치는 점을 주원인으로 추정했다. EP8에서는 rank 하나가
+expert 그룹 하나를 통째로 가지므로, 한 token의 expert 8개가 rank 8개 중 최대 4개에 몰린다. 추정 손실은
+token당 +1.9-3.8 ms(FP8 EP8)이고 측정 증가분 +2.8 ms와 맞는다. round-robin 배치
+(`--expert-placement-strategy round_robin`)는 시험하지 않았다. 이 추정이 맞으면 "A100에서 EP는 이득이
+없다"는 결론은 linear 배치에만 해당한다. C2가 부하 상태에서
 이득을 보는 이유는 attention이 NVLink 위의 독립 TP8 group 두 개로 실행되고, 각 group이
-요청의 절반을 처리하기 때문이다. 요청 1개에서 손해를 보는 이유는 그때 모든 MoE layer가
-InfiniBand로 gather와 scatter를 하고, 유휴 replica는 dummy step을 실행하기 때문이다.
+요청의 절반을 처리하기 때문으로 보인다. 포트 kernel의 휴리스틱(indexer grid 크기, sparse-MLA split 경계)도
+concurrency 32에서 C2에 유리하게 작용했을 수 있다(추정, 검토 보고서 4.3절). 요청 1개에서 손해를 보는 이유는
+그때 모든 MoE layer가 InfiniBand로 gather와 scatter를 하고, 유휴 replica는 dummy step을 실행하기 때문이다.
 
 **데모 결정.** FP8은 TP8 x PP2, NVFP4는 TP8을 유지한다. 이 layout이 단일 대화에서 가장
-낮은 지연, 262,144 token 전체 context, 가장 많은 KV cache를 제공한다.
+낮은 지연과 가장 많은 KV cache를 제공한다. context는 FP8이 262,144 token 전체, NVFP4가 auto-fit한
+254,016 token이다.
 DP2 x TP8 + EP는 단일 요청 지연이 커지는 것과 238,656 token까지의 context를 받아들이는
 throughput 중심 batch 서빙에만 맞는다. TP16 + EP는 여기서 이점이 없다.
 
@@ -1400,12 +1465,20 @@ queue에 넣었다. AML은 비워진 노드를 이 job에 넘기지 않았다. �
 
 **한계.**
 
-- 측정점당 sample 1개다. 반복하면 몇 퍼센트 수준의 차이는 바뀔 수 있다.
-- random prompt만, concurrency 1과 32만, 32K token까지의 입력만 시험했다.
+- 측정점당 sample 1개다. 같은 TP8 x PP2 native 구성의 8K·concurrency 32 출력이 2026-10-03(8.1)
+  269 tok/s, 2026-10-21 208 tok/s로 23% 달랐다. 주원인은 2026-10-03 측정의 prefix cache 재사용이다
+  (8.1 정정. priority scheduling 등 설정 차이도 있다). 1K는 0.7% 안에서 같았다. 디코드 지표(한 요청 TPOT·ITL)는
+  cache 재사용의 영향을 받지 않고, A·D를 다른 날 다시 띄워도 0.9% 안에서 재현됐다. 반복 측정 전에는 5% 이하 차이로 결론을
+  내리지 않는다.
+- random prompt만, concurrency 1과 32만, 32K token까지의 입력만 시험했다. concurrency 32 측정은
+  요청 32개를 한꺼번에 보내는 방식이라 8K·32K에서는 디코드보다 프리필 처리량과 KV 용량을 잰다. 32K·concurrency
+  32는 모든 layout의 KV cache를 넘는다.
 - 시험하지 않음: EPLB, `--enable-ep-weight-filter`, round-robin 배치, DeepEP.
 - 품질은 기능 suite와 tool-calling suite로만 점검했다.
 - vLLM의 `info_once`는 rank와 expert 배치 줄을 노드당 rank 하나에서만 기록한다.
   나머지 mapping은 소스에서 도출했다.
+- 증거의 NVFP4 phase `startup.nccl_ib` 값 `"tcp"`는 launcher의 의도를 기록한 것이다. NCCL 로그에는
+  8개 process가 InfiniBand plugin을 쓴 줄이 있다. 노드 1개 구성이라 속도에는 영향이 없다.
 
 ## 9. 알려진 한계와 다음 단계
 
@@ -1546,10 +1619,11 @@ queue에 넣었다. AML은 비워진 노드를 이 job에 넘기지 않았다. �
 - 동일한 요청 간에 출력이 bitwise로 재현되지 않는다. vLLM 0.23의 batch-invariant
   모드는 이 FP8 MoE 모델로 A100에서 시작할 수 없다. 정확한 재현성에는 FP8을 지원하는
   GPU(compute capability 8.9 이상)가 필요하고, 그 환경에서 검증해야 한다.
-- 속도는 짧은 입력에서 B200 노드 1개의 약 절반이고, 16K 이상에서는 10-36%다
-  (8.1). tech report의 두 가지 가속 기법 중 EAGLE3는 A100에서 사용할 수 없다.
-  NVFP4는 A100 노드 1개에서 FP8 노드 2개와 거의 같은 짧은 입력 속도로 실행된다.
-  이는 GPU당 B200의 4분의 1이 아니라 약 절반이다. A100에는 FP4 tensor core가 없어서
+- 속도는 B200 노드 1개 대비 1K 입력에서 0.43x, 8K에서 0.39x(2026-10-21 재측정 환산)이고, 16K 이상에서는
+  10-36%다(8.1. 16K 이상은 cache 재사용의 영향이 작은 것으로 본다). tech report의 두 가지 가속 기법 중 EAGLE3는
+  A100에서 사용할 수 없다. NVFP4는 A100 노드 1개에서 같은 날 측정한 FP8 노드 2개의 0.83-1.10x로 실행된다(8.7).
+  GPU당으로는 B200의 4분의 1이 아니라 약 절반이다(같은 날 D 기준 1K 0.47x. 8.4의 0.47-0.49x는 같은 seed 측정).
+  A100에는 FP4 tensor core가 없어서
   expert가 W4A16으로 실행되며, 나머지 격차는 하드웨어 때문이다(8.4).
 - 이제 모든 구성이 시작 probe가 InfiniBand를 확인하면 NCCL에 InfiniBand를 사용한다
   (`aml/src/ib_probe.py`). Azure의 NDv4 topology 파일은 azhpc-images 저장소에서
@@ -1557,9 +1631,20 @@ queue에 넣었다. AML은 비워진 노드를 이 job에 넘기지 않았다. �
 - 694 GB의 Hub 다운로드는 멈출 수 있다(68%에서 한 번 관측). `stage_weights.py`의
   watchdog가 재시작하고 이어받는다. 프로덕션에서는 weight를 같은 region의
   storage나 이미지 cache에 한 번 staging해야 한다.
-- Expert parallelism을 측정했다(8.7). A100에서 데모 layout을 이긴 것은 부하 상태의
-  DP2 x TP8 + EP뿐이었고, 단일 요청 지연은 두 배였다. Data-parallel
-  replica와 `fastsafetensors` 로딩은 여전히 이 검증의 범위 밖이다.
+- Expert parallelism을 측정했다(8.7). concurrency 32에서 세 입력 모두 데모 layout을 앞선 것은
+  DP2 x TP8 + EP뿐이었고(EP 없는 TP16은 1K·8K에서 1.04x, 32K에서 0.89x), 단일 요청 지연은 약 두 배였다.
+  Data-parallel replica와 `fastsafetensors` 로딩은 여전히 이 검증의 범위 밖이다.
+- **DSA 포트의 잠재 버그(2026-11-09 검토).** PR #38476의 Triton paged MQA-logits 디코드 kernel은
+  행 너비(batch의 최대 길이)가 64의 배수가 아니면, 가장 긴 행의 마지막 64-token 블록을 다음 요청 행의 앞쪽
+  최대 63칸에 −inf로 쓴다. 그 행이 마지막 행이면 tensor 끝을 최대 252 byte 넘겨 쓴다. indexer가 CUDA graph
+  없이 실행되는 step(프리필과 디코드가 섞인 step 등)에서만 생긴다. 소스 분석과 CPU 에뮬레이션으로 찾았고
+  GPU에서 재현하지 않았다. 기존 측정의 처리량, 기능·tool 점검에서는 드러나지 않았다. 출력과 속도에 미친
+  영향은 미확인이다. 수정은 `aml/src/dsa_port.json`에 넣었고(5b) CPU에서만 확인했다. 고객용 재측정 전에
+  GPU 회귀 시험을 한다.
+- **측정 방법의 한계(2026-11-09 검토).** layout마다 서버를 1번 띄웠고, concurrency 32 측정은 요청 32개를
+  한꺼번에 보내는 synthetic burst다. 2026-10-03·10-04 작업은 모든 측정점에 같은 seed를 써서 prefix cache
+  재사용이 섞였다(8.1 정정). 처리량 순위, SLO 기준 용량, 토큰당 비용은 반복 측정 뒤에 낸다. 계획(미실행)은
+  [검토 보고서](report/REVIEW_2026-11-09.md) 8절에 있다.
 - Model 전용 API(8.6)는 BYOM 사전 데모 경로이며, Model Catalog 등록이 아니다.
   미해결 항목은 8.6 끝에 있다. 설명되지 않은 Foundry `model_error` 한 건의 원인과
   tool 이름 치환이 이를 막는지 여부, 어느 layer가 Foundry의 입력 token 수에서 4를
