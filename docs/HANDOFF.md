@@ -29,6 +29,21 @@ Bootstrap archive는 결정적 gzip과 `/home/data/sources` 아래의 변경 불
 매핑이 없으면 명시적으로 실패한다. 프로필 경로, 출처, 비교 모드, 컨텍스트/지표
 정의와 기존 OCR/sandbox 제한은 `demo/README.md`를 참조한다.
 
+## 2026-11-09: 서빙 실험 검토와 정정
+
+검토자 5명이 서빙 실험(2026-10-02~10-21)과 문서를 읽기 전용으로 검토했다. Azure와 GPU는 쓰지 않았다.
+결과는 [검토 보고서](report/REVIEW_2026-11-09.md)에 있다. 아래 날짜별 항목의 일부 수치는 그 결과에 따라
+"**2026-11-09 정정:**"으로 고쳤다. 주요 내용은 다음과 같다.
+
+- 2026-10-03·10-04 측정은 모든 측정점에 같은 seed를 써서 prefix cache 재사용이 섞였다. 일부 처리량,
+  Fig. 7 비율(2K-8K), 토큰당 비용은 재측정 전까지 사용하지 않는다.
+- low-priority 클러스터는 2026-03-31부터 Spot으로 할당·과금된다. 이전 low-priority 요율은 적용되지 않는다.
+- DSA 포트의 Triton 인덱서 디코드 커널에서 잠재 버그 1건을 소스 분석으로 찾았다. GPU에서 재현하지 않았다.
+  수정은 `aml/src/dsa_port.json`에 넣었다(패치 파일이 5개에서 6개가 됨, SERVING_DESIGN.md 5b절). CPU의 Triton
+  interpreter로만 확인했고, CUDA 회귀 테스트는 아직 GPU에서 실행하지 않았다. 수정은 이 변경 이후의 실행부터
+  적용된다. 지금까지 기록한 결과는 모두 수정 전 커널로 실행했고, 버그가 그 결과에 준 영향은 확인하지 않았다
+  (처리량, 기능·도구 점검에서는 드러나지 않았다).
+
 ## 2026-10-07: AX Microsoft Agent Framework 데모
 
 프런트엔드는 이제 기존 역방향 링크 위에서 Microsoft Agent Framework Python 1.20.0
@@ -133,7 +148,8 @@ thinking을 켠 파일 작업은 실제 `reasoning_content` stream을 보존했�
   필요하다. 비밀번호는 저장소가 아니라 `~/.axk2-demo/passwords`(WSL)에 있다.
 - **GPU:** `demo/ctl.sh on|off|status`. `on`은 uksouth, italynorth, francecentral에서
   low-priority job을 경쟁시켜 노드 2개를 먼저 얻은 job을 유지하며, 약 25분 후에
-  준비된다. low-priority 노드 2개의 비용은 시간당 약 USD 16이다. **`ctl.sh off`는
+  준비된다. low-priority 노드 2개의 비용은 시간당 약 USD 16이다. **2026-11-09 정정:** low-priority는
+  2026-03-31부터 Spot으로 과금된다. uksouth Spot 기준 노드 2개는 시간당 약 USD 26이다. **`ctl.sh off`는
   사용자가 명시적으로 요청할 때만 실행한다.**
 - **데모에서 측정한 값:** 첫 토큰 0.4 s, 사용자당 45-49 tok/s.
 - **배포 주의점:** Oryx가 아직 빌드 중인데 `deploy.sh`가 "Kudu Status 502"로 끝날 수
@@ -152,6 +168,9 @@ thinking을 켠 파일 작업은 실제 `reasoning_content` stream을 보존했�
 | CLIcK | 91.6 | 85.5 | 131/200 | ±6.1 |
 | IFBench | 75.9 | 78.6 | 112/200 | ±7.6 |
 | NIAH | 100 | 100 (9/9, 32K-256K) | 검증 실행 | - |
+
+**2026-11-09 정정:** AIME26은 완료한 10문항이 모두 정답이라 95% CI가 [100, 100]으로 붕괴해 공개값과 비교할
+수 없다. KoBALT·IFBench는 공개값이 CI 안에 있어 차이를 구별할 수 없다는 뜻이며, 품질 동등성의 근거가 아니다.
 
 `python docs/report/make_figures.py --only eval`은 차트와 HF card 표
 (`docs/report/figures/benchmark-table.md`)를 다시 만든다.
@@ -179,12 +198,15 @@ v0.24.0에서 이를 8.0으로 낮췄다. 이 변경을 backport하여
 - **Kernel:** A100에는 FP4 tensor core가 없으므로 NVFP4 expert는 Marlin을 통해
   W4A16으로 실행된다(B200은 W4A4로 실행한다). FP8 레이어와 attention은 이전과
   같이 실행된다.
-- **속도:** 1K 입력, 동시성 32까지는 16개 A100의 FP8 체크포인트와 같은 output
-  tok/s(1.01-1.06x)를 낸다. 동시성 64-128에서는 0.81-0.86x, prefill이 더 느린
-  8K-32K 입력에서는 0.64-0.98x다. tech report의 Fig. 7 조건에서는 1K-4K 입력에서
-  B200 노드 하나의 0.47-0.49x에 이른다. 이는 GPU당 B200의 4분의 1이 아니라 약
-  절반이다. 8K-32K에서는 0.20-0.35x다.
-- **비용:** 출력 토큰 백만 개당 두 노드의 FP8보다 38-56% 적다.
+- **속도:** 같은 날(2026-10-21) 측정에서 16개 A100의 FP8 체크포인트의 0.83-1.10x다(1K·8K 요청 1개
+  1.01-1.02x). 아래 이전 기록은 교차 비교이고 같은 seed 측정이라 재측정 전까지 사용하지 않는다. 이전 기록:
+  1K 입력, 동시성 32까지는 같은 output tok/s(1.01-1.06x), 동시성 64-128에서는 0.81-0.86x, prefill이 더 느린
+  8K-32K 입력에서는 0.64-0.98x. tech report의 Fig. 7 조건에서는 1K-4K 입력에서 B200 노드 하나의 0.47-0.49x,
+  8K-32K에서는 0.20-0.35x. 같은 날 D 기준 1K는 0.47x(889.8/1,900)로 GPU당 B200의 약 절반이다.
+- **비용:** 이전 기록은 출력 토큰 백만 개당 두 노드의 FP8보다 38-56% 적다고 했다.
+- **2026-11-09 정정:** 위 이전 기록의 속도 비율(1.01-1.06x, 0.81-0.86x, 0.64-0.98x)은 다른 날짜·리전·연결(2026-10-03
+  italynorth, TCP)의 FP8 값과 맞댄 교차 비교다. FP8(2026-10-03)과 NVFP4(2026-10-04) 작업 모두 모든 측정점에 같은
+  seed를 써서 prefix cache 재사용이 섞였다. 비용 비교 38-56%도 같은 이유로 재측정 전까지 사용하지 않는다.
 - **제한:** backport에 의존하므로 운영 환경에서는 vLLM 0.24 이상을 사용한다. 품질은
   위의 probe로만 확인했다. KV cache는 두 FP8 노드의 673,792 토큰 중 38-41%를 담는다.
 
@@ -213,10 +235,11 @@ Azure 상태: 모든 리소스를 다시 삭제했다(리소스 그룹
 - **tech report Fig. 7 대비 속도**(B200 노드 하나, 동시성 32, 출력 1K): 16개
   A100의 native는 1K-8K 입력에서 0.43-0.51x, 16K-120K에서 0.10-0.36x에 이른다.
   16K-120K에서는 KV cache(673,792 토큰)가 동시성을 제한한다. dense는 같은 범위에서
-  0.52-0.64x와 0.23-0.58x에 이른다.
+  0.52-0.64x와 0.23-0.58x에 이른다. **2026-11-09 정정:** 이 sweep은 모든 측정점에 같은 seed를 써서
+  2K-8K 값이 prefix cache 재사용으로 부풀었다. 2026-10-21 재측정으로 환산하면 native 8K는 0.39x다.
 - **EAGLE3:** 사용할 수 없다. PP와 함께 실행할 수 없다. TP16에서는 A100 MLA decode
   kernel이 다중 토큰 draft를 검증할 수 없다. CUDA graph로 시작하면 실패하고, eager
-  모드는 4-5배 느리다.
+  모드는 4-5배 느리다(**2026-11-09 정정:** CUDA graph를 쓴 TP16 대비 4.3-5.3배).
 - **NVFP4:** A100에서 불가능하다고 보고했다(compute capability 8.9 필요).
   **2026-10-04 정정:** 이는 소프트웨어 검사이며, 체크포인트는 A100 노드 하나에서
   실행된다(위 항목 참조).
@@ -230,7 +253,8 @@ soft-delete 상태다. 이 실행에는 약 USD 80-125가 들었다.
 이제 모델은 공개된 weight와 config, 그리고 자체 DeepSeek Sparse Attention 규칙으로
 A100에서 실행된다. attention은 대체 Triton kernel로 계산한다. 이는 upstream vLLM
 PR #38476(`TRITON_MLA_SPARSE`와 Triton indexer logits)을 해시 검사와 함께 포팅한
-것이며, SERVING_DESIGN.md 5b절과 `aml/src/dsa_port.json`에 설명되어 있다. 5c절은
+것이며, SERVING_DESIGN.md 5b절과 `aml/src/dsa_port.json`에 설명되어 있다. **2026-11-09 정정:** 이 포트는
+이제 인덱서 디코드 커널의 버그 수정을 포함해 파일 6개를 패치한다. 이 항목의 결과는 수정 전 커널로 얻었다. 5c절은
 참조용 단일 노드 배포와의 모든 차이를 나열한다. 여기에는 tool-call parser 미설정과
 60K를 넘는 컨텍스트 미검증이라는 공백도 포함된다.
 
@@ -242,6 +266,8 @@ PR #38476(`TRITON_MLA_SPARSE`와 Triton indexer logits)을 해시 검사와 함�
   12/12 찾았다. native는 동시성 1-128에서 50-812 output tok/s를 냈고, 1K부터 32K
   컨텍스트까지 TPOT는 19-21 ms였다. dense는 10-60% 빨랐지만 2,048 토큰까지만
   정확하다. 자세한 내용은 8.2절과 `evidence/a100-native-*.json`에 있다.
+  **2026-11-09 정정:** 이 측정은 노드 간 TCP였고, 같은 seed로 인한 prefix cache 재사용이 섞였다.
+  동시성 8 이상의 처리량과 dense 비율(이 작업 기준 11-64%)은 재측정 전까지 사용하지 않는다.
 
 Azure 상태: 모든 리소스를 다시 삭제했다(리소스 그룹
 `rg-axk2-aml-208d24c1`, 02:09Z). 삭제된 workspace 이름은 14일 동안 예약된 상태로

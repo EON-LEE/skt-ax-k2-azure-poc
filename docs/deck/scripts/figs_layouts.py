@@ -2,7 +2,7 @@
 from common import *
 from common import _mark
 import data as D
-from figs_summary import trio, fmt_t, col_for, ep_pairs, KS, SIZES, GREY2
+from figs_summary import trio, fmt_t, col_for, ep_pairs, KS, SIZES, GREY2, TAINTED
 
 LOG_NOTE = ("영국 남부, 2026-10-21, 출력 1,024 토큰, 조건당 1회라 몇 % 차이는 반복하면 달라질 수 있다. TPOT = 출력 토큰 1개당 시간(중앙값), 가중치/KV = GPU당 GiB. "
             "출처: tables/t01_layout_summary.csv, tables/t02_ep_points_long.csv")
@@ -90,7 +90,7 @@ def s12():
          "KV가 줄어든 것은 MLA KV가 TP 랭크마다 복제되기 때문으로 보인다."),
         ("참고: dense TP16은 다른 작업",
          f"같은 10-03 작업의 dense 모드에서 TP16은 TP8×PP2보다 c32 총 tok/s가 1K {dense[1024]:.2f}배, 4K {dense[4096]:.2f}배, 8K {dense[8192]:.2f}배였다. "
-         "모드와 지표가 달라 직접 비교하지 않는다."))
+         "4K·8K는 같은 시드로 캐시를 재사용해 부푼 값이 섞였다. 모드와 지표가 달라 직접 비교하지 않는다."))
     assert max(r32) > 1 and min(r32) < 1
 
 
@@ -128,10 +128,10 @@ def s14():
         LOG_NOTE,
         ("해석 (프로파일링하지 않음)",
          "EP8이 한 노드 안(NVLink)에서만 이뤄지는데도 8~12% 느렸다. 손실을 노드 사이 통신 탓으로만 돌릴 수 없다. "
-         "DP=1이라 all2all 없이 NoDPEP 경로를 쓴다(로그, 사실). 손실 원인은 측정하지 않았다."),
+         "DP=1이라 all2all 없이 NoDPEP 경로를 쓴다(로그, 사실). 검토 추정 원인은 그룹 라우팅과 linear 전문가 배치가 겹친 부하 불균형이다."),
         ("KV·컨텍스트는 그대로다",
          f"KV 캐시 토큰({D.kv_label('C1')} 대 {D.kv_label('A')})과 최대 컨텍스트({D.max_ctx('C1'):,})는 같다. "
-         f"서버 시작은 {D.healthy('C1')}초로 A의 {D.healthy('A')}초보다 짧았지만 원인은 모르고 측정은 1회다."),
+         f"서버 시작 {D.healthy('C1')}초(A {D.healthy('A')}초)는 1회 측정이고 실행 순서·캐시 영향을 받아 구성끼리 비교하지 않는다."),
         side_ec=NAVY, side_hc=None)
 
 
@@ -150,7 +150,8 @@ def s15():
         LOG_NOTE,
         ("해석 (프로파일링하지 않음)",
          "로그에 “AgRsAll2AllManager”가 남았다(사실): MoE 층마다 복제본 둘이 allgather·reducescatter로 묶인다. "
-         "요청이 많으면 일을 나누어 빠르고, 한 요청이면 노드 사이 통신과 쉬는 복제본의 빈 실행 탓에 느린 것으로 보이나 측정하지 않았다."),
+         "요청이 많으면 일을 나누어 빠르고, 한 요청이면 노드 사이 통신과 쉬는 복제본의 빈 실행 탓에 느린 것으로 보이나 측정하지 않았다. "
+         "API 서버 2개·배치 한도 합계 2배(엔진 2개)도 섞였다."),
         ("c32 첫 토큰 대기는 뒤섞인다",
          f"A 대비 c32 첫 토큰 중앙값은 {trio(tt)}배(1K/8K/32K)다. c32에서 세 입력 모두 A를 앞선 FP8 구성은 이것뿐이다."))
 
@@ -189,8 +190,10 @@ def s16b():
     assert r[0] > 1 and r[1] > 1 and 0.95 < r[2] < 1.05 and all(x < 0.9 for x in r[3:]), r
     run_nv = int(D.NVF7[32768]["nvfp4_8_a100"]["peak_running_requests"])
     run_fp = int(D.NVF7[32768]["fp8_16_a100_native_ib"]["peak_running_requests"])
+    same_day_8k = D.out("D", 8192, 32) / D.out("A", 8192, 32)
+    assert abs(same_day_8k - 0.90) < 0.01 and r[sizes.index(8192)] < 0.75, (same_day_8k, r)
     fig, ax = slide(
-        f"Fig. 7 조건: NVFP4×8은 FP8×16의 {min(r):.2f}~{max(r):.2f}배",
+        "Fig. 7 조건: NVFP4×8과 FP8×16 (작업이 다른 교차 비교, 재측정 전 참고값)",
         "동시 32개, 출력 1,024 토큰, 입력 1K~32K. 총 처리량(입력+출력 tok/s) 기준",
         "영국 남부. NVFP4×8(노드 1개, 2026-10-04 작업)과 FP8×16 native(InfiniBand, 2026-10-03 작업)는 작업이 달라 조건이 완전히 같지는 않다. "
         "B200은 SKT 기술보고서 Fig. 7 막대 라벨 값. 조건당 1회. 출처: tables/t04_fig7_doc_speed.csv",
@@ -211,15 +214,19 @@ def s16b():
     cols = [("입력 토큰", 20, "l")] + [(x, colw, "c") for x in k]
     rows = [
         [("B200 공개값", {"b": True})] + [f"{v:,.0f}" for v in pub],
-        [("A100 FP8×16", {"b": True})] + [f"{v:,.0f}" for v in fp8],
-        [("A100 NVFP4×8", {"b": True})] + [f"{v:,.0f}" for v in nv],
-        [("  NVFP4÷FP8 (배)", {"c": GREY})] + [(f"{v:.2f}", {"c": GREEN if v >= 1.05 else VERM if v < 0.95 else INK}) for v in r],
-        [("  GPU당 환산 (배)", {"c": GREY})] + [(f"{2 * v:.2f}", {"c": GREY}) for v in r],
+        [("A100 FP8×16", {"b": True})] + [f"{v:,.0f}" + ("†" if s in TAINTED else "") for s, v in zip(sizes, fp8)],
+        [("A100 NVFP4×8", {"b": True})] + [f"{v:,.0f}†" for v in nv],
+        [("  NVFP4÷FP8 (배)", {"c": GREY})] + [(f"{v:.2f}†", {"c": GREY}) for v in r],
+        [("  GPU당 환산 (배)", {"c": GREY})] + [(f"{2 * v:.2f}†", {"c": GREY}) for v in r],
     ]
     bottom = table(ax, 3, 28.4, cols, rows, fs=11.5, hfs=11.5, padx=0.6, pady=0.5)
-    label(ax, 3, bottom - 2.0, f"1K·2K는 NVFP4가 앞서고({r[0]:.2f}, {r[1]:.2f}배), 4K는 비슷하고({r[2]:.2f}배), 8K 이상은 뒤진다({min(r[3:]):.2f}~{max(r[3:]):.2f}배).", 12.5, INK, max_w=94)
-    label(ax, 3, bottom - 4.2, f"32K에서 동시 실행은 NVFP4 {run_nv}개, FP8 {run_fp}개다. NVFP4 노드 1개의 KV 풀({D.kv_label('D')} 토큰) 한계로 보인다.", 12.5, INK, max_w=94)
-    label(ax, 3, bottom - 6.4, "GPU당 환산은 GPU 수(8 대 16)로 나눈 산술값이다. 정확도 동등성은 측정하지 않았다.", 12.5, VERM, max_w=94)
+    same_day = rels("D", "A", 1) + rels("D", "A", 32)
+    label(ax, 3, bottom - 2.0, f"비율은 순위 판단에 쓰지 않는다. 같은 날 같은 조건 비교(s16a)에서 NVFP4 TP8은 FP8 16장의 "
+          f"{min(same_day):.2f}~{max(same_day):.2f}배였다.", 12.5, INK, max_w=94)
+    label(ax, 3, bottom - 4.2, f"†: 두 작업(FP8 10-03, NVFP4 10-04) 모두 지점마다 같은 시드를 써 처리량이 높게 나왔다. "
+          f"8K {r[sizes.index(8192)]:.2f}배가 같은 날 {same_day_8k:.2f}배와 다른 이유다. 재측정 전까지 쓰지 않는다.", 12.5, VERM, max_w=94)
+    label(ax, 3, bottom - 6.4, f"32K 동시 실행은 NVFP4 {run_nv}개, FP8 {run_fp}개다(NVFP4 KV 풀 {D.kv_label('D')} 토큰 한계로 보인다). "
+          "GPU당 환산은 GPU 수(8 대 16)로 나눈 산술값이고, 정확도 동등성은 측정하지 않았다.", 12.5, INK, max_w=94)
     save(fig, "s16b_nvfp4-fig7.png")
 
 
@@ -241,7 +248,7 @@ def s17():
          "랭크마다 expert 부하가 달라 가장 바쁜 랭크를 기다리는 것으로 볼 수 있으나 랭크별 부하는 측정하지 않았다."),
         ("EP 효과는 어디서나 같은 방향이다",
          f"EP를 켠 비교 {len(ep)}개(3쌍×입력 3개×c1/c32)가 모두 1.0 미만, 범위 {min(ep):.3f}~{max(ep):.3f}배다. "
-         f"서버 시작은 EP 켬 {D.healthy('E')}초, 끔 {D.healthy('D')}초(원인 모름, 1회)."),
+         f"서버 시작 EP 켬 {D.healthy('E')}초, 끔 {D.healthy('D')}초는 1회 측정이고 실행 순서(D 다음 E)·캐시 영향을 받는다."),
         side_ec=NAVY, side_hc=None)
 
 

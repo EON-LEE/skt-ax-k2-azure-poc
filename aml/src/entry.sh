@@ -72,6 +72,8 @@ if [ "$RANK" = 0 ] && [ -n "${AXK2_LINK_URL:-}" ]; then
       touch /tmp/axk2-evalpkgs.ready || touch /tmp/axk2-evalpkgs.failed
   ) &
 fi
+# slo-/diag-/cap-/dx* phases, docs/BENCHMARK_PROTOCOL.md
+[ -f "$SRC/bench/protocol.sh" ] && . "$SRC/bench/protocol.sh"
 
 read -r IFACE NODE_IP HEAD_IP < <(python3 - <<'EOF'
 import fcntl, os, socket, struct
@@ -267,7 +269,7 @@ report "node$RANK.ray_install" --text "{\"ray\": \"$RAY_VERSION\"}"
 
 export VLLM_HOST_IP="$NODE_IP" NCCL_SOCKET_IFNAME="$IFACE" GLOO_SOCKET_IFNAME="$IFACE"
 if [ "$IB_MODE" = ib ]; then
-  export NCCL_IB_DISABLE=0 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET
+  export NCCL_IB_DISABLE=0 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,NET}
 else
   export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}" NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 fi
@@ -704,7 +706,8 @@ if [ "$RUN_KERNEL_TESTS" = "1" ]; then
   began=$(date +%s)
   if timeout 1200 python3 -m pytest -q -p no:cacheprovider --tb=short \
        "$TESTS_DIR/tests/kernels/attention/test_mqa_logits_triton.py" \
-       "$TESTS_DIR/tests/kernels/attention/test_triton_mla_sparse_kernel.py" > "$OUT/kernel-tests.log" 2>&1; then
+       "$TESTS_DIR/tests/kernels/attention/test_triton_mla_sparse_kernel.py" \
+       $(ls "$SRC/bench/test_dsa_port_regression.py" 2>/dev/null) > "$OUT/kernel-tests.log" 2>&1; then
     phase_result kernel_tests passed "$began" "$(tail -n 1 "$OUT/kernel-tests.log")"
   else
     phase_result kernel_tests failed "$began" "$(tail -n 1 "$OUT/kernel-tests.log")"
@@ -805,7 +808,7 @@ EOF
     FULL_NATIVE=$(cat /tmp/axk2-full.dir)
     if [ -n "${PHASE_PLAN:-}" ]; then
       for name in $PHASE_PLAN; do
-        if [ "$name" = demo ]; then demo_phase; else plan_phase "$name"; fi
+        if [ "$name" = demo ]; then demo_phase; elif [ -n "${BENCH_PLAN:-}" ]; then protocol_phase "$name"; else plan_phase "$name"; fi
         report "node0.phases" --text "$(python3 -c "import json; print(json.dumps([json.loads(l) for l in open('$PHASES')]))")"
       done
     else

@@ -161,13 +161,15 @@ def s07():
     allr = [D.out(a, s, c) / D.out(b, s, c) for a, b in pairs for s in D.SIZES for c in (1, 32)]
     assert max(allr) < 1.0
     lo, hi = (1 - max(allr)) * 100, (1 - min(allr)) * 100
+    tp = [tpot(a, s) / tpot(b, s) for a, b in pairs for s in D.SIZES]
+    tlo, thi = (min(tp) - 1) * 100, (max(tp) - 1) * 100
     w, ch, cy = 30.5, 10.4, 6.2
-    card(ax, 3, cy, w, ch, "옮겨지는 것은 전문가뿐",
-         "어텐션과 공유 전문가는 기존 TP 배치 그대로다. 라우팅되는 전문가 256개만 GPU에 나눠 담는다.", fs=12)
+    card(ax, 3, cy, w, ch, "옮겨지는 것은 라우팅 전문가뿐",
+         "라우팅 전문가 256개만 GPU에 나눠 담고 어텐션은 그대로다. 공유 전문가는 DP=1이면 TP 배치 그대로, DP2에서는 GPU마다 복제된다.", fs=12)
     card(ax, 3 + w + 1.5, cy, w, ch, "DP가 1이면 토큰을 주고받지 않는다",
          "각 GPU가 자기 전문가로 모든 토큰을 계산하고, 합계를 TP 그룹에서 all-reduce한다. EP를 안 켰을 때와 같은 통신이다.", fs=12)
     card(ax, 3 + 2 * (w + 1.5), cy, w, ch, "측정: 켜도 빨라지지 않았다",
-         f"같은 구성에서 EP만 켜면 출력 tok/s가 {lo:.0f}~{hi:.0f}% 줄었다. 3쌍 × 6개 조건 모두 1.0 미만이다. 조건당 표본은 1회다.",
+         f"EP 켬/끔 3쌍(각 1회)에서 출력 tok/s가 {lo:.0f}~{hi:.0f}% 줄고(18개 조건 모두 1.0 미만), 한 요청 TPOT가 {tlo:.0f}~{thi:.0f}% 늘었다.",
          ec=VERM, hc=VERM, fs=12)
     save(fig, "s07_ep.png")
 
@@ -207,7 +209,8 @@ def s08():
     ]
     bottom = table(ax, 62, 44.2, [("지표", 15.5, "l"), ("입력 1K / 8K / 32K 순", 19.5, "l")], rows, fs=12, hfs=12, pady=0.55)
     card(ax, 62, 9.6, 35, bottom - 1.6 - 9.6, "해석 (측정 아님)",
-         "요청이 많으면 어텐션이 NVLink 위 TP8 두 그룹으로 요청을 절반씩 나눠 처리해 유리하다. 요청이 1개면 MoE 층마다 IB를 건너 모으고 나누는 비용을 치르고, 쉬는 복제본도 같은 박자로 빈 스텝을 돈다.",
+         "요청이 많으면 어텐션이 NVLink 위 TP8 두 그룹으로 요청을 절반씩 나눠 처리해 유리하다. 요청이 1개면 MoE 층마다 IB를 건너 모으고 나누는 비용을 치르고, 쉬는 복제본도 같은 박자로 빈 스텝을 돈다. "
+         "A와의 비교에는 API 서버 2개·배치 한도 합계 2배도 섞였다.",
          ec=GREY, hc=GREY, fs=12)
     save(fig, "s08_dp.png")
 

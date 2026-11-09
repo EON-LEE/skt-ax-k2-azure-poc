@@ -13,7 +13,9 @@ frontend (GET /api/link/src with its job token) and checks it against AXK2_SRC_S
 Templates with __AXK2_SRC_GIT__ carry no payload either: they download aml/src from this public repository
 at the pinned commit (raw.githubusercontent.com, the host the overlay already fetches from) and check every
 file against __AXK2_SRC_MANIFEST__ (name:sha256 of the git blob). Rendering refuses unless aml/src is
-committed and that commit is on the remote.
+committed and that commit is on the remote. The manifest also lists the benchmark-only files of aml/src/bench
+(bench/<name>) for templates whose download command creates the bench/ directory (os.makedirs); older
+templates get the top-level files only. The embedded payload and the demo's archive never carry aml/src/bench.
 
 usage: python aml/render_job.py aml/jobs/<template>.yml [more templates...]
 writes: aml/jobs/.rendered/<template>.yml
@@ -44,6 +46,13 @@ def src_files():
     return [path for path in sorted((HERE / "src").iterdir()) if path.is_file() and path.suffix in {".py", ".sh", ".json"}]
 
 
+def bench_files():
+    """Benchmark-protocol files (aml/src/bench): fetched by git-pinned benchmark jobs, never in the payload."""
+    folder = HERE / "src" / "bench"
+    return [path for path in sorted(folder.iterdir()) if path.is_file() and path.suffix in {".py", ".sh", ".json"}] \
+        if folder.is_dir() else []
+
+
 def payload():
     buffer = io.BytesIO()
     with gzip.GzipFile(fileobj=buffer, mode="wb", filename="", mtime=0) as compressed:
@@ -69,9 +78,16 @@ def git_pin():
     found = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", git("remote", "get-url", "origin").decode().strip())
     if not found:
         raise ValueError("origin is not a GitHub repository")
-    names = [path.name for path in src_files()]
+    names = [path.name for path in src_files()] + [f"bench/{path.name}" for path in bench_files()]
     manifest = ",".join(f"{name}:{hashlib.sha256(git('show', f'{commit}:aml/src/{name}')).hexdigest()}" for name in names)
     return f"{found.group(1)}@{commit}", manifest
+
+
+def manifest_for(template, manifest):
+    """The manifest a template can download: bench/<name> entries only if its command creates directories."""
+    if "os.makedirs" in template:
+        return manifest
+    return ",".join(item for item in manifest.split(",") if "/" not in item.split(":", 1)[0])
 
 
 def digest(encoded):
@@ -111,7 +127,10 @@ def main(templates):
     for template in map(Path, templates):
         try:
             source = template.read_text(encoding="utf-8")
-            pinned = dict(zip(("AXK2_SRC_GIT", "AXK2_SRC_MANIFEST"), git_pin())) if SRC_GIT in source else {}
+            pinned = {}
+            if SRC_GIT in source:
+                repo, manifest = git_pin()
+                pinned = {"AXK2_SRC_GIT": repo, "AXK2_SRC_MANIFEST": manifest_for(source, manifest)}
             text = render(source, encoded, {**values, **pinned})
         except (ValueError, subprocess.CalledProcessError) as error:
             raise SystemExit(f"{template}: {error}")

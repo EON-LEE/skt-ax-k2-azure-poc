@@ -189,8 +189,10 @@ def write_all_tables():
     rows = []
     for s, nm in names.items():
         d = BM["summary"][s]
+        ifs = BM["summary"]["ifbench"]["prompt_strict"] * 100
         note = {"aime": "10/30 문항, 10/60 생성만 실행. 모두 정답이라 신뢰구간이 0으로 붕괴함",
-                "kobalt": "200문항 부분 표본", "click": "200문항 부분 표본", "ifbench": "200문항 부분 표본"}[s]
+                "kobalt": "200문항 부분 표본", "click": "200문항 부분 표본",
+                "ifbench": f"200문항 부분 표본. 점수는 prompt-loose 기준(prompt-strict {ifs:.1f})"}[s]
         rows.append([nm, PUB_ROWS[s]["skt"], r(d["score"] * 100, 1), r(d["ci95"][0] * 100, 1), r(d["ci95"][1] * 100, 1),
                      d["n_items"], d["items_expected"], d["n_generations"], d["generations_expected"],
                      r(d["mean_completion_tokens"], 0), note])
@@ -225,9 +227,10 @@ def write_all_tables():
                      r(f["median_tpot_ms"]), r(pa["nvfp4_8_gpus"]["median_ttft_ms"]), r(pb["nvfp4_8_gpus"]["median_ttft_ms"]),
                      r(f["median_ttft_ms"])])
     write_csv("t05_nvfp4_vs_fp8.csv",
-              ["시험", "NVFP4×8 출력 tok/s (배치 토큰 8192)", "NVFP4×8 출력 tok/s (배치 토큰 2048)", "FP8×16 출력 tok/s",
-               "NVFP4×8 TPOT ms (8192)", "NVFP4×8 TPOT ms (2048)", "FP8×16 TPOT ms",
-               "NVFP4×8 TTFT ms (8192)", "NVFP4×8 TTFT ms (2048)", "FP8×16 TTFT ms"], rows)
+              ["시험", "NVFP4×8 출력 tok/s (배치 토큰 8192)", "NVFP4×8 출력 tok/s (배치 토큰 2048)",
+               "FP8×16 출력 tok/s (2026-10-03 이탈리아 북부·TCP, 교차 비교)",
+               "NVFP4×8 TPOT ms (8192)", "NVFP4×8 TPOT ms (2048)", "FP8×16 TPOT ms (2026-10-03 이탈리아 북부·TCP)",
+               "NVFP4×8 TTFT ms (8192)", "NVFP4×8 TTFT ms (2048)", "FP8×16 TTFT ms (2026-10-03 이탈리아 북부·TCP)"], rows)
 
     # t06 -------------------------------------------------------------------------------------
     rows = []
@@ -268,13 +271,14 @@ def write_all_tables():
     # t08 (HARD-CODED prices: retail lookup, not part of the evidence JSON) ---------------------
     pr = NV["cost_per_million_output_tokens_usd"]["prices_usd_per_node_hour"]
     rows = [
-        ["ND96amsr_A100_v4 소매가(시간당 USD)", 40.962, "영국 남부, 소매(retail), 2026-11-02 조회. 직접 조회한 값(증거 JSON에는 없음)"],
+        ["ND96amsr_A100_v4 소매가(시간당 USD)", 40.962, "영국 남부, 소매(retail), 2026-11-02 조회. NVFP4 증거 JSON(2026-10-04 조회)에는 40.96"],
         ["ND96isr_H100_v5 소매가(시간당 USD)", 122.90, "영국 남부, 소매(retail), 2026-11-02 조회. 직접 조회한 값(증거 JSON에는 없음)"],
         ["A100 / H100 가격비", 0.333, "위 두 값의 비"],
         ["2노드 A100(시간당 USD)", 81.92, "40.96 × 2"],
         ["2노드 H100(시간당 USD)", 245.80, "122.90 × 2"],
         ["ND96amsr_A100_v4 Spot(시간당 USD)", pr["spot"], "NVFP4 증거 JSON의 단가표. 실험 비용 추정에만 사용"],
-        ["ND96amsr_A100_v4 Low-priority(시간당 USD)", pr["low_priority"], "NVFP4 증거 JSON의 단가표"],
+        ["ND96amsr_A100_v4 Low-priority(시간당 USD)", pr["low_priority"],
+         "NVFP4 증거 JSON의 단가표. 이전 요율: Azure ML 저우선은 2026-03-31부터 Spot으로 과금되어 적용되지 않음"],
         ["FP8 체크포인트 크기(GB)", NV["checkpoint"]["fp8_checkpoint_size_gb"], "NVFP4 증거 JSON"],
         ["NVFP4 체크포인트 크기(GB)", NV["checkpoint"]["size_gb"], "NVFP4 증거 JSON"],
         ["노드 1대 GPU 메모리(GB)", 640, "A100 80GB × 8"],
@@ -285,7 +289,7 @@ def write_all_tables():
     # t09 ---------------------------------------------------------------------------------------
     rows = [
         ["EAGLE3 (CUDA graph 사용)", "시작 실패", "TRITON_MLA 디코드는 요청당 쿼리 1토큰만 받음. 검증 쿼리 4토큰에서 AssertionError (max_query_len <= reorder_batch_threshold)", "a100-verification-and-doc-speed.json"],
-        ["EAGLE3 (eager 대체)", "동작하나 느림", "수락 길이 1.046 토큰/스텝(초안 수락률 1.5%). TP16 비투기 대비 처리량 0.19~0.23배", "a100-verification-and-doc-speed.json"],
+        ["EAGLE3 (eager 대체)", "동작하나 느림", "수락 길이 1.046 토큰/스텝(초안 수락률 1.5%). CUDA graph를 쓴 TP16 비투기 대비 처리량 0.19~0.23배", "a100-verification-and-doc-speed.json"],
         ["EAGLE3 + 파이프라인 병렬(PP)", "불가", "초안 모델이 층 2·30·58의 은닉 상태를 읽는데, PP2에서는 단계 경계를 넘는 것이 은닉 상태·잔차뿐. vLLM도 미지원으로 표기. TP16으로 대신 측정", "a100-verification-and-doc-speed.json"],
         ["EAGLE3 + native DSA 포트", "실행 안 함", "투기 디코딩에서 seq_lens 형태가 [batch, next_n]인데 포팅한 Triton 커널은 [batch]로 읽음. 결과 검증 불가", "a100-verification-and-doc-speed.json"],
         ["batch-invariant 모드", "시작 실패", "'No FP8 MoE backend supports the deployment configuration'. 배치 불변을 선언한 MoE 커널은 Triton뿐이고, 그 FP8 경로는 연산 능력 8.9가 필요(A100은 8.0)", "a100-verification-and-doc-speed.json"],
@@ -299,13 +303,13 @@ def write_all_tables():
     rows = [
         ["첫 전체 모델 실행(dense, TP8×PP2)", "2026-10-02", "이탈리아 북부", "TCP(IB 끔)", "FP8 ×16 GPU", "a100-full-model-tp8-pp2-results.json"],
         ["native DSA 라운드", "2026-10-02~03", "이탈리아 북부 / 영국 남부", "라운드마다 다름", "FP8 ×16 GPU", "a100-native-dsa-deployment-log.json"],
-        ["native vs dense 전체 모델", "2026-10-03", "이탈리아 북부", "TCP(IB 끔)", "FP8 TP8×PP2, max_model_len 65,536, 출력 256", "a100-native-vs-dense-full-model.json"],
-        ["검증 + Fig.7 조건 속도 + TP16 + EAGLE3", "2026-10-03", "영국 남부", "InfiniBand", "FP8 ×16 GPU, NIAH 256K까지", "a100-verification-and-doc-speed.json"],
-        ["NVFP4 1노드", "2026-10-04", "영국 남부", "단일 노드(NVLink)", "NVFP4 TP8, GPU 8장", "a100-nvfp4-single-node.json"],
+        ["native vs dense 전체 모델", "2026-10-03", "이탈리아 북부", "TCP(IB 끔)", "FP8 TP8×PP2, max_model_len 65,536, 출력 256, 측정점 공통 시드(캐시 재사용)", "a100-native-vs-dense-full-model.json"],
+        ["검증 + Fig.7 조건 속도 + TP16 + EAGLE3", "2026-10-03", "영국 남부", "InfiniBand", "FP8 ×16 GPU, NIAH 256K까지, 측정점 공통 시드(캐시 재사용)", "a100-verification-and-doc-speed.json"],
+        ["NVFP4 1노드", "2026-10-04", "영국 남부", "단일 노드(NVLink)", "NVFP4 TP8, GPU 8장, 측정점 공통 시드(캐시 재사용)", "a100-nvfp4-single-node.json"],
         ["정확도 벤치마크(부분 실행)", "2026-10-06", "증거에 기록 없음", "데모 클러스터", "FP8 native TP8×PP2, thinking 모드", "a100-benchmarks.json"],
-        ["EP 비교(7개 구성)", "2026-10-21", "영국 남부", "FP8: InfiniBand / NVFP4: 단일 노드", "FP8 5구성 + NVFP4 2구성", "a100-expert-parallel-comparison.json"],
-        ["2층 vs 공식 구현 (dense 모드, 약 3,300 위치)", "증거에 기록 없음", "이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)", "단일 노드 TP8", "앞 2층, 실제 가중치, 공식 구현은 FP32", "a100-2layer-vs-official.json"],
-        ["2층 vs 공식 구현 (native DSA·dense, 14,618 위치)", "증거에 기록 없음", "이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)", "TP8 1노드, TP8×PP2 2노드", "앞 2층, 실제 가중치, 공식 구현은 FP32", "a100-native-dsa-2layer-vs-official.json"],
+        ["EP 비교(7개 구성)", "2026-10-21", "영국 남부", "FP8: InfiniBand / NVFP4: 단일 노드", "FP8 5구성 + NVFP4 2구성, 측정점마다 다른 시드", "a100-expert-parallel-comparison.json"],
+        ["2층 vs 공식 구현 (dense 모드, 약 3,300 위치)", "2026-10-02", "이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)", "단일 노드 TP8", "앞 2층, 실제 가중치, 공식 구현은 FP32. 첫 전체 모델 실행과 같은 작업", "a100-2layer-vs-official.json"],
+        ["2층 vs 공식 구현 (native DSA·dense, 14,618 위치)", "2026-10-02~03", "이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)", "TP8 1노드, TP8×PP2 2노드", "앞 2층, 실제 가중치, 공식 구현은 FP32. native DSA 라운드 1회차", "a100-native-dsa-2layer-vs-official.json"],
     ]
     write_csv("t10_experiment_registry.csv", ["실험", "날짜", "리전", "연결", "구성·조건", "증거 파일"], rows)
 

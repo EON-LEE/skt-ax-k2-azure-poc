@@ -7,6 +7,8 @@ GREY2 = "#9AA5B1"
 SIZES = D.SIZES
 KS = [D.SZ[s] for s in SIZES]
 SIZE_COLORS = [SKY, BLUE, NAVY]
+# Points of the 2026-10-03/10-04 sweeps that reused earlier points' prompts from the prefix cache (shared seed).
+TAINTED = (2048, 4096, 8192)
 
 
 def trio(vals, f="{:.2f}"):
@@ -31,12 +33,23 @@ def ep_pairs():
     return [D.out(on, s, c) / D.out(off, s, c) for on, off in pairs for c in (1, 32) for s in SIZES]
 
 
+def ep_tpot_pairs():
+    """EP on divided by EP off, single-request median TPOT, for the three layout pairs and every input size."""
+    pairs = (("B", "B0"), ("C1", "A"), ("E", "D"))
+    return [D.point(on, s, 1)["median_tpot_ms"] / D.point(off, s, 1)["median_tpot_ms"] for on, off in pairs for s in SIZES]
+
+
+def fig7_clean_ratios():
+    """B200 ratio of the 2026-10-21 baseline A (own seed per point), converted to total tok/s: {input: ratio}."""
+    return {s: D.out("A", s, 32) * (s + 1024) / 1024 / D.PUB_FIG7[s][0] for s in SIZES}
+
+
 def s09a():
     fig, ax = slide(
         "실험 7개 구성: 속도·용량·시작 시간 한눈에",
         "출력 tok/s는 기준 구성 대비 배수. 입력 1K / 8K / 32K 순, 조건당 1회 측정",
         "FP8 5구성은 A(TP8×PP2) 대비, NVFP4 2구성은 D(NVFP4 TP8) 대비. 영국 남부, FP8은 InfiniBand, 2026-10-21. c1 = 한 요청, c32 = 32개 동시, 출력 1,024 토큰. "
-        "초록 = 세 입력 모두 기준 이상(TPOT는 이하), 주황 = 모두 기준 미만(TPOT는 초과). 출처: tables/t01_layout_summary.csv",
+        "초록 = 세 입력 모두 기준 이상(TPOT는 이하), 주황 = 모두 기준 미만(TPOT는 초과). 시작(초)은 1회 측정이며 실행 순서·캐시 영향을 받는다. 출처: tables/t01_layout_summary.csv",
     )
     cols = [("구성", 14.5, "l"), ("GPU", 4.5, "c"), ("시작\n(초)", 5.5, "c"), ("KV 캐시 토큰", 14, "c"), ("최대\n컨텍스트", 8.5, "c"),
             ("32K·c32\n동시 실행", 8, "c"), ("c1 출력\n(기준 대비 ×)", 13, "c"), ("c1 TPOT\n(기준 대비 ×)", 13, "c"), ("c32 출력\n(기준 대비 ×)", 13, "c")]
@@ -68,14 +81,19 @@ def s09a():
     assert fp8_c1_best and c2_all and not others_c32
     c2r = [D.ratio("C2", s, 32) for s in SIZES]
     c2c1 = [D.ratio("C2", s, 1) for s in SIZES]
+    b0r = [D.ratio("B0", s, 32) for s in SIZES]
+    assert b0r[0] > 1 and b0r[1] > 1 and b0r[2] < 1, b0r
+    tp_ep = ep_tpot_pairs()
     w, gap, h = 30.0, 2.0, 12.0
     y0 = 5.8
     card(ax, 3, y0, w, h, "EP만 켜면 5~12% 느렸다",
-         f"같은 구성에서 EP만 켠 비교 18개 조건이 모두 1.0 미만이다 ({min(ep):.3f}~{max(ep):.3f}).", ec=ORANGE, fs=12, hc=VERM)
-    card(ax, 3 + w + gap, y0, w, h, "한 요청은 TP8×PP2가 가장 빠르다",
+         f"EP 켬/끔 3쌍(각 1회)의 18개 비교가 모두 1.0 미만이다 ({min(ep):.3f}~{max(ep):.3f}). 한 요청 TPOT는 "
+         f"{100 * (min(tp_ep) - 1):.0f}~{100 * (max(tp_ep) - 1):.0f}% 늘었다.", ec=ORANGE, fs=12, hc=VERM)
+    card(ax, 3 + w + gap, y0, w, h, "한 요청은 FP8 중 TP8×PP2가 가장 빠르다",
          f"FP8 5구성 중 한 요청 출력 tok/s가 세 입력 모두 가장 높다 (1K {D.out('A', 1024, 1):.1f}). NVFP4 TP8은 GPU 8장으로 {D.out('D', 1024, 1):.1f}.", ec=NAVY, fs=12)
-    card(ax, 3 + 2 * (w + gap), y0, w, h, "동시 32개는 DP2×TP8+EP16만 앞선다",
-         f"세 입력 모두 기준을 넘는다 (×{min(c2r):.2f}~{max(c2r):.2f}). 대신 한 요청은 ×{min(c2c1):.2f}~{max(c2c1):.2f}, 컨텍스트 상한은 {D.max_ctx('C2'):,}.",
+    card(ax, 3 + 2 * (w + gap), y0, w, h, "동시 32개에서 세 입력 모두 앞선 것은 DP2×TP8+EP16뿐",
+         f"세 입력에서 ×{min(c2r):.2f}~{max(c2r):.2f}. TP16은 1K·8K에서 ×{b0r[0]:.2f}·{b0r[1]:.2f}다. 대신 한 요청은 ×{min(c2c1):.2f}~{max(c2c1):.2f}, "
+         f"컨텍스트 상한은 {D.max_ctx('C2'):,}.",
          ec=GREEN, fs=12, hc=GREEN)
     assert bottom > y0 + h + 0.4, bottom
     save(fig, "s09a_summary-table.png")
@@ -83,7 +101,7 @@ def s09a():
 
 def s09b():
     fig, ax = slide(
-        "기준 대비 속도: EP는 느리고 DP2만 동시성에서 앞선다",
+        "기준 대비 속도: EP는 느리고, 동시 32에서 세 입력 모두 앞선 것은 DP2뿐",
         "출력 tok/s를 기준 구성으로 나눈 값. 1.00보다 크면 기준보다 빠르다",
         "기준: FP8은 A(TP8×PP2), NVFP4는 D(NVFP4 TP8). 영국 남부, FP8은 InfiniBand, 2026-10-21. 입력 1K/8K/32K, 출력 1,024 토큰, 조건당 1회. "
         "TP16은 EP 없는 구성(B0), TP16+EP16은 B. 출처: tables/t01_layout_summary.csv",
@@ -138,9 +156,12 @@ def s09c():
     ax.plot([xl, xl], [top - 1.5 - 6 * step - step / 2, top - 0.2], color=VERM, ls="--", lw=1.8, zorder=4)
     b0 = D.kv_list("B0")[0] / D.kv_list("A")[0]
     assert abs(b0 - 0.46) < 0.005
+    w_c2, w_b0 = (D.cfg(c)["parallel"]["model_loading_gib"]["node0"][0] for c in ("C2", "B0"))
+    assert 3.0 < w_c2 - w_b0 < 3.2, (w_c2, w_b0)
     y1 = 12.4
     label(ax, 3, y1, f"TP16은 KV가 TP8×PP2의 {b0:.2f}배다. 해석: MLA KV 캐시가 TP 랭크마다 복제되고, TP16에서는 각 랭크가 61층 전체를 맡는다.", 12.5, INK, max_w=94)
-    label(ax, 3, y1 - 2.4, f"DP2×TP8+EP16은 복제본마다 어텐션 가중치를 전 층에 두므로 KV가 줄어 컨텍스트 상한이 {D.max_ctx('C2'):,}이다 (해석).", 12.5, INK, max_w=94)
+    label(ax, 3, y1 - 2.4, f"DP2×TP8+EP16은 GPU당 가중치가 TP16보다 {w_c2 - w_b0:.1f} GiB 많고(대부분 GPU마다 복제한 공유 전문가, 추정) "
+          f"그만큼 KV가 줄어 컨텍스트 상한이 {D.max_ctx('C2'):,}이다.", 12.5, INK, max_w=94)
     label(ax, 3, y1 - 4.8, f"NVFP4는 노드 1대(GPU 8장)라서 KV 풀이 {D.kv_list('D')[0]:,} 토큰이고, 최대 컨텍스트도 그 값으로 제한된다.", 12.5, INK, max_w=94)
     save(fig, "s09c_kv-capacity.png")
 
@@ -295,7 +316,7 @@ def s11b():
     axc.set_yticks([0, 4000, 8000, 12000])
 
     colw = 74.0 / n
-    cols = [("입력 토큰", 20, "l")] + [(D.SZ[s], colw, "c") for s in sizes]
+    cols = [("입력 토큰", 20, "l")] + [(D.SZ[s] + ("†" if s in TAINTED else ""), colw, "c") for s in sizes]
     nat_r = [a / b for a, b in zip(nat, pub)]
     den_r = [a / b for a, b in zip(den, pub)]
     rows = [
@@ -306,8 +327,12 @@ def s11b():
         [("  B200 대비 ×", {"c": GREY})] + [(f"{v:.2f}", {"c": GREY}) for v in den_r],
     ]
     bottom = table(ax, 3, 29.3, cols, rows, fs=11.5, hfs=11.5, padx=0.6, pady=0.5)
-    label(ax, 3, bottom - 2.2, f"native는 B200의 {min(nat_r):.2f}~{max(nat_r):.2f}배, dense는 {min(den_r):.2f}~{max(den_r):.2f}배다. 입력이 길수록 격차가 벌어진다.", 12.5, INK, max_w=94)
-    label(ax, 3, bottom - 4.6, "dense는 DSA 희소 선택을 건너뛰어 더 빠르지만, 긴 문맥에서는 정확하지 않았다 (슬라이드 18).", 12.5, INK, max_w=94)
+    clean = fig7_clean_ratios()
+    assert abs(clean[1024] - nat_r[0]) < 0.01 and clean[8192] < nat_r[sizes.index(8192)] - 0.1, (clean, nat_r)
+    label(ax, 3, bottom - 2.2, f"native는 B200의 {min(nat_r):.2f}~{max(nat_r):.2f}배, dense는 {min(den_r):.2f}~{max(den_r):.2f}배다(† 포함). 입력이 길수록 격차가 벌어진다.", 12.5, INK, max_w=94)
+    label(ax, 3, bottom - 4.6, "†: 같은 시드로 앞 지점의 프롬프트를 캐시에서 재사용해 부풀었다. 재측정 전까지 쓰지 않는다. "
+          f"2026-10-21 재측정 환산(native): 1K {clean[1024]:.2f}, 8K {clean[8192]:.2f}, 32K {clean[32768]:.2f}배.", 12.5, VERM, max_w=94)
+    label(ax, 3, bottom - 7.0, "dense는 DSA 희소 선택을 건너뛰어 더 빠르지만, 긴 문맥에서는 정확하지 않았다 (슬라이드 18).", 12.5, INK, max_w=94)
     save(fig, "s11b_fig7-b200-vs-a100.png")
 
 

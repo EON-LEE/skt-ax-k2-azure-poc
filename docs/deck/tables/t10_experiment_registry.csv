@@ -1,10 +1,10 @@
 ﻿실험,날짜,리전,연결,구성·조건,증거 파일
 "첫 전체 모델 실행(dense, TP8×PP2)",2026-10-02,이탈리아 북부,TCP(IB 끔),FP8 ×16 GPU,a100-full-model-tp8-pp2-results.json
 native DSA 라운드,2026-10-02~03,이탈리아 북부 / 영국 남부,라운드마다 다름,FP8 ×16 GPU,a100-native-dsa-deployment-log.json
-native vs dense 전체 모델,2026-10-03,이탈리아 북부,TCP(IB 끔),"FP8 TP8×PP2, max_model_len 65,536, 출력 256",a100-native-vs-dense-full-model.json
-검증 + Fig.7 조건 속도 + TP16 + EAGLE3,2026-10-03,영국 남부,InfiniBand,"FP8 ×16 GPU, NIAH 256K까지",a100-verification-and-doc-speed.json
-NVFP4 1노드,2026-10-04,영국 남부,단일 노드(NVLink),"NVFP4 TP8, GPU 8장",a100-nvfp4-single-node.json
+native vs dense 전체 모델,2026-10-03,이탈리아 북부,TCP(IB 끔),"FP8 TP8×PP2, max_model_len 65,536, 출력 256, 측정점 공통 시드(캐시 재사용)",a100-native-vs-dense-full-model.json
+검증 + Fig.7 조건 속도 + TP16 + EAGLE3,2026-10-03,영국 남부,InfiniBand,"FP8 ×16 GPU, NIAH 256K까지, 측정점 공통 시드(캐시 재사용)",a100-verification-and-doc-speed.json
+NVFP4 1노드,2026-10-04,영국 남부,단일 노드(NVLink),"NVFP4 TP8, GPU 8장, 측정점 공통 시드(캐시 재사용)",a100-nvfp4-single-node.json
 정확도 벤치마크(부분 실행),2026-10-06,증거에 기록 없음,데모 클러스터,"FP8 native TP8×PP2, thinking 모드",a100-benchmarks.json
-EP 비교(7개 구성),2026-10-21,영국 남부,FP8: InfiniBand / NVFP4: 단일 노드,FP8 5구성 + NVFP4 2구성,a100-expert-parallel-comparison.json
-"2층 vs 공식 구현 (dense 모드, 약 3,300 위치)",증거에 기록 없음,"이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)",단일 노드 TP8,"앞 2층, 실제 가중치, 공식 구현은 FP32",a100-2layer-vs-official.json
-"2층 vs 공식 구현 (native DSA·dense, 14,618 위치)",증거에 기록 없음,"이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)","TP8 1노드, TP8×PP2 2노드","앞 2층, 실제 가중치, 공식 구현은 FP32",a100-native-dsa-2layer-vs-official.json
+EP 비교(7개 구성),2026-10-21,영국 남부,FP8: InfiniBand / NVFP4: 단일 노드,"FP8 5구성 + NVFP4 2구성, 측정점마다 다른 시드",a100-expert-parallel-comparison.json
+"2층 vs 공식 구현 (dense 모드, 약 3,300 위치)",2026-10-02,"이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)",단일 노드 TP8,"앞 2층, 실제 가중치, 공식 구현은 FP32. 첫 전체 모델 실행과 같은 작업",a100-2layer-vs-official.json
+"2층 vs 공식 구현 (native DSA·dense, 14,618 위치)",2026-10-02~03,"이탈리아 북부(vLLM) / 스웨덴 중부(공식 구현, CPU)","TP8 1노드, TP8×PP2 2노드","앞 2층, 실제 가중치, 공식 구현은 FP32. native DSA 라운드 1회차",a100-native-dsa-2layer-vs-official.json

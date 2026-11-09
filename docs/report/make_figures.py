@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 REPORT_DIR = Path(__file__).resolve().parent
 DEFAULT_OUT = REPORT_DIR / "figures"
 INPUTS_FIG7 = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 120000]
-PRICE_METERS = ["on_demand", "reserved_1_year", "reserved_3_years", "spot", "low_priority"]
+# Azure ML low priority has been billed as Spot since 2026-03-31, so its old meter is left out of the cost outputs.
+PRICE_METERS = ["on_demand", "reserved_1_year", "reserved_3_years", "spot"]
 PRICE_LABELS_KO = {
     "on_demand": "종량제",
     "reserved_1_year": "1년 예약",
@@ -17,6 +18,15 @@ PRICE_LABELS_KO = {
     "spot": "Spot",
     "low_priority": "Low priority",
 }
+EP_EVIDENCE = ROOT / "evidence" / "a100-expert-parallel-comparison.json"
+# Points of the 2026-10-03/10-04 sweeps that reused earlier points' prompts from the prefix cache (one seed for all points).
+TAINTED_INPUTS = (2048, 4096, 8192)
+REVIEW_NOTE_KO = (
+    "2026-11-09 검토에 따라 주의를 붙였다. 이 표의 A100 값은 2026-10-03(FP8, 영국 남부, InfiniBand)과 "
+    "2026-10-04(NVFP4, 영국 남부, 노드 1대) 작업에서 나왔다. 두 작업은 모든 측정점에 같은 난수 시드를 써서, "
+    "뒤 측정점이 앞 측정점의 프롬프트를 프리픽스 캐시에서 재사용했다. † 표시 값은 재측정 전까지 사용하지 않는다. "
+    "자세한 내용은 [검토 보고서](../REVIEW_2026-11-09.md)에 있다."
+)
 LOGPROB_EVIDENCE = ROOT / "evidence" / "a100-native-2layer-logprob-series.json"
 LOGPROB_GROUPS = {
     "native_tp8": ("Native TP8 (1노드)", "#1f77b4", "node0.smoke-native-tp8.series"),
@@ -395,8 +405,12 @@ def render_fig7_overlay(data, out_dir):
     ax.set_title("Fig. 7 조건 처리량: B200 공개값 vs A100 측정값" if ko else "Fig. 7 throughput: published B200 vs measured A100")
     ax.grid(axis="y", alpha=0.28)
     ax.legend(ncol=2, fontsize=9)
-    foot = "조건: random dataset, concurrency 32, 출력 1,024 tokens, FP8/BF16 KV. 출처: SKT Fig. 7, verify_suites.py, evidence/*.json." if ko else "Conditions: random dataset, concurrency 32, 1,024 output tokens, FP8/BF16 KV. Sources: SKT Fig. 7, verify_suites.py, evidence/*.json."
-    fig.text(0.01, 0.015, foot, fontsize=8, color="#444")
+    foot = ("조건: random dataset, concurrency 32, 출력 1,024 tokens, FP8/BF16 KV. 출처: SKT Fig. 7, verify_suites.py, evidence/*.json.\n"
+            "2K~8K의 A100 값은 같은 시드로 앞 측정점의 프롬프트를 캐시에서 재사용해 부풀었다(재측정 전까지 사용하지 않음)."
+            if ko else
+            "Conditions: random dataset, concurrency 32, 1,024 output tokens, FP8/BF16 KV. Sources: SKT Fig. 7, verify_suites.py, evidence/*.json.\n"
+            "A100 values at 2K-8K reused earlier points' prompts from the prefix cache (one seed); do not use until re-measured.")
+    fig.text(0.01, 0.015, foot, fontsize=8, color="#444", va="bottom")
     _save(fig, out_dir / "fig7-overlay.png")
 
 
@@ -445,8 +459,16 @@ def render_per_gpu(data, out_dir):
     ax.set_title("GPU당 처리량 비교" if ko else "Per-GPU throughput comparison")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(ncol=3, fontsize=8)
-    foot = "FP8 A100은 B200 FP8 대비 GPU당 약 1/4, NVFP4 A100은 짧은 입력에서 B200 FP8 대비 약 1/2 수준." if ko else "A100 FP8 is about one quarter of B200 FP8 per GPU; A100 NVFP4 is about one half of B200 FP8 at short inputs."
-    fig.text(0.01, 0.015, foot, fontsize=8, color="#444")
+    foot = ("작업이 다른 값을 맞댔다: A100 FP8 2026-10-03, A100 NVFP4 2026-10-04, B200은 SKT 공개 그림 값. "
+            "B200 NVFP4의 GPU 수 4장은 그림에 표시되지 않은 가정이다.\n"
+            "A100 FP8(2026-10-03)과 NVFP4(2026-10-04)는 모든 측정점에 같은 시드를 써서 캐시 재사용이 섞였다. 처리량이 높게 나왔다"
+            "(FP8 4K·8K가 특히 크다). 재측정 전까지 사용하지 않는다."
+            if ko else
+            "Values from different jobs: A100 FP8 2026-10-03, A100 NVFP4 2026-10-04, B200 from SKT's published figures. "
+            "The B200 NVFP4 GPU count (4) is an assumption; the figure does not show it.\n"
+            "Both A100 runs used one seed for every point, so prompts were reused from the prefix cache and throughput "
+            "reads high (most for FP8 at 4K and 8K); do not use until re-measured.")
+    fig.text(0.01, 0.015, foot, fontsize=8, color="#444", va="bottom")
     _save(fig, out_dir / "per-gpu-throughput.png")
 
 
@@ -469,10 +491,15 @@ def render_cost(data, out_dir):
         ax.bar_label(bars, labels=[f"{v:.2f}" for v in vals], fontsize=7, padding=2, rotation=90)
     ax.set_xticks(xbase, [PRICE_LABELS_KO[m] if ko else m.replace("_", " ") for m in PRICE_METERS])
     ax.set_ylabel("USD / 1M 출력 토큰" if ko else "USD per 1M output tokens")
-    ax.set_title("출력 100만 토큰당 비용" if ko else "Cost per 1M output tokens")
+    ax.set_title("출력 100만 토큰당 비용 (이전 값, 재측정 전까지 사용하지 않음)" if ko else "Cost per 1M output tokens (superseded; do not use until re-measured)")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(ncol=2, fontsize=8)
-    fig.text(0.01, 0.015, cost["formula"], fontsize=8, color="#444")
+    foot = ("서로 다른 작업의 처리량으로 계산한 교차 비교이고, C128은 같은 시드로 인한 캐시 재사용이 섞였다. "
+            "저우선 요율은 2026-03-31부터 Spot 과금이라 뺐다.\n식: " + cost["formula"]
+            if ko else
+            "Cross-job comparison; the C128 throughputs include prefix-cache reuse (one seed). The low-priority meter is left out: "
+            "Azure ML bills it as Spot since 2026-03-31.\nFormula: " + cost["formula"])
+    fig.text(0.01, 0.015, foot, fontsize=8, color="#444", va="bottom")
     _save(fig, out_dir / "cost-per-1m-output-tokens.png")
 
 
@@ -488,8 +515,24 @@ def _ratio(num, den):
     return f"{num / den:.2f}"
 
 
+def _rerun_c32_output(path=EP_EVIDENCE):
+    """Concurrency-32 output tok/s of the 2026-10-21 re-measurement (own seed per point) for FP8 baseline A and NVFP4 baseline D."""
+    jobs = _read_json(Path(path))["jobs"]
+    out = {}
+    for name, key in (("fp8", "epc-fp8-tp8pp2"), ("nvfp4", "epc-nvfp4-tp8")):
+        points = jobs[name]["configs"][key]["points"]
+        out[name] = {isl: points[f"isl{isl}-c32"]["output_throughput"] for isl in (1024, 8192, 32768)}
+    return out
+
+
+def _mark(text, input_tokens):
+    """Flag a value from a point that reused earlier prompts through the prefix cache."""
+    return text + ("†" if input_tokens in TAINTED_INPUTS else "")
+
+
 def write_tables(data, out_dir):
-    lines = ["# 처리량 표", ""]
+    rerun = _rerun_c32_output()
+    lines = ["# 처리량 표", "", REVIEW_NOTE_KO, ""]
     b200 = _point_map(data, "b200_fp8_k2")
     native = _point_map(data, "a100_fp8_native")
     dense = _point_map(data, "a100_fp8_dense")
@@ -501,7 +544,11 @@ def write_tables(data, out_dir):
     ]
     for i in INPUTS_FIG7:
         bt, nt, dt = _total(b200[i]), _total(native[i]), _total(dense[i])
-        lines.append(f"| {_fmt_input(i)} | {_fmt_int(bt)} | {_fmt_int(nt)} | {_ratio(nt, bt)} | {_fmt_int(dt)} | {_ratio(dt, bt)} |")
+        lines.append(f"| {_fmt_input(i)} | {_fmt_int(bt)} | {_mark(_fmt_int(nt), i)} | {_mark(_ratio(nt, bt), i)} | "
+                     f"{_mark(_fmt_int(dt), i)} | {_mark(_ratio(dt, bt), i)} |")
+    clean = {i: rerun["fp8"][i] * (i + 1024) / 1024 / _total(b200[i]) for i in rerun["fp8"]}
+    lines += ["", "†: 2K~8K는 앞 측정점의 프롬프트를 캐시에서 재사용해 부풀었다. 같은 native 구성을 측정점마다 다른 시드로 다시 잰 "
+              f"2026-10-21 값으로 환산하면 B200 대비 1K {clean[1024]:.2f}, 8K {clean[8192]:.2f}, 32K {clean[32768]:.2f}다."]
 
     nv = _point_map(data, "a100_nvfp4")
     b200_nv = _point_map(data, "b200_nvfp4_k2_fig9")
@@ -509,6 +556,9 @@ def write_tables(data, out_dir):
     for i in sorted(nv):
         at = _total(nv[i])
         lines.append(f"| {_fmt_input(i)} | {_fmt_int(at)} | {_ratio(at, _total(b200[i]))} | {_fmt_int(_total(b200_nv[i]))} | {_ratio(at, _total(b200_nv[i]))} |")
+    drift = {i: _output(nv[i]) / rerun["nvfp4"][i] - 1 for i in rerun["nvfp4"]}
+    lines += ["", "NVFP4 값은 2026-10-04 작업이다. 같은 시드로 측정했고, 2026-10-21 재측정과의 동시 32 출력 차이는 "
+              f"1K {drift[1024]:+.1%}, 8K {drift[8192]:+.1%}, 32K {drift[32768]:+.1%}다."]
 
     per_keys = ["b200_fp8_k2", "a100_fp8_native", "a100_fp8_dense", "a100_nvfp4", "b200_nvfp4_k2_fig9"]
     common = set(_point_map(data, per_keys[0]))
@@ -517,13 +567,17 @@ def write_tables(data, out_dir):
     per_inputs = [i for i in [1024, 4096, 8192, 16384, 32768] if i in common]
     lines += ["", "## GPU당 총 tok/s", "", "| 입력 | B200 FP8 K2 | A100 FP8 native | A100 FP8 dense | A100 NVFP4 | B200 NVFP4 |", "| ---: | ---: | ---: | ---: | ---: | ---: |"]
     for i in per_inputs:
-        vals = []
-        for key in per_keys:
-            vals.append(_total(_point_map(data, key)[i]) / data["series"][key]["gpu_count"])
-        lines.append(f"| {_fmt_input(i)} | " + " | ".join(_fmt_int(v) for v in vals) + " |")
+        cells = [_fmt_int(_total(_point_map(data, key)[i]) / data["series"][key]["gpu_count"]) for key in per_keys]
+        cells[1], cells[2] = _mark(cells[1], i), _mark(cells[2], i)
+        lines.append(f"| {_fmt_input(i)} | " + " | ".join(cells) + " |")
+    lines += ["", "열마다 작업이 다르다. A100 FP8 native·dense는 2026-10-03, A100 NVFP4는 2026-10-04 작업이고, B200은 SKT 공개 그림 값이다. "
+              f"B200 NVFP4의 GPU 수({data['series']['b200_nvfp4_k2_fig9']['gpu_count']}장)는 그림에 표시되지 않은 가정이다"
+              "(SERVING_DESIGN의 4 x B200 설명). †는 위 Fig. 7 표와 같다."]
 
     cost = data["cost_per_million_output_tokens_usd"]
-    lines += ["", "## 출력 100만 토큰당 비용 (USD)", "", "| 워크로드 | 구성 | 종량제 | 1년 예약 | 3년 예약 | Spot | Low priority |", "| --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+    lines += ["", "## 출력 100만 토큰당 비용 (USD, 이전 값)", "",
+              "| 워크로드 | 구성 | " + " | ".join(PRICE_LABELS_KO[m] for m in PRICE_METERS) + " |",
+              "| --- | --- | " + " | ".join("---:" for _ in PRICE_METERS) + " |"]
     rows = [
         ("C32, 1K in, 1K out", "NVFP4 1 node", cost["concurrency_32_input_1k_output_1k"]["nvfp4_1_node"]),
         ("C32, 1K in, 1K out", "FP8 2 nodes", cost["concurrency_32_input_1k_output_1k"]["fp8_2_nodes"]),
@@ -532,6 +586,13 @@ def write_tables(data, out_dir):
     ]
     for workload, config, row in rows:
         lines.append(f"| {workload} | {config} | " + " | ".join(f"{row[m]:.2f}" for m in PRICE_METERS) + " |")
+    lines += ["", "이 표는 기록으로만 남기고 재측정 전까지 사용하지 않는다. FP8과 NVFP4 처리량은 서로 다른 작업에서 측정했다"
+              "(C32 행: FP8 2026-10-03 영국 남부·InfiniBand, NVFP4 2026-10-04 영국 남부. C128 행: FP8 2026-10-03 이탈리아 북부·TCP, "
+              "NVFP4 2026-10-04). C128 행의 두 처리량에는 같은 시드로 인한 캐시 재사용이 섞였다. "
+              f"C32 행의 NVFP4 처리량은 2026-10-21 재측정보다 {drift[1024]:.1%} 높았다.",
+              "",
+              "Low priority 열은 뺐다. Azure ML 저우선 클러스터는 2026-03-31부터 Spot으로 할당·과금되므로 이전 저우선 요율"
+              f"(노드·시간당 ${cost['prices_usd_per_node_hour']['low_priority']:.2f})은 적용되지 않는다."]
     with (out_dir / "throughput-tables.md").open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(lines) + "\n")
 

@@ -13,7 +13,7 @@ Attention은 대체 Triton 커널로 A100에서 실행된다. 이 커널은 upst
 5c절에 나열되어 있다. 8.1절은 속도를 기술 보고서의 B200 측정값과 비교한다.
 SKT의 4-bit NVFP4 checkpoint도 upstream vLLM 변경을 backport한 뒤 이런 노드 **한 대**에서
 실행된다(8.4절). 용량은 별도의 Azure ML low-priority 할당량(리전당 300 vCPU)에서
-확보한다. 배포 자산은 `aml/`에 있다.
+확보한다. 이 할당량의 노드는 2026-03-31부터 Spot으로 할당·과금된다. 배포 자산은 `aml/`에 있다.
 
 **서빙한 구성:** [docs/VLLM_CONFIGS.md](docs/VLLM_CONFIGS.md)는 지금까지 서빙한
 모든 vLLM 구성을 나열한다. 데모 프로필 두 개, expert-parallel 레이아웃, 이전 변형이
@@ -30,32 +30,35 @@ SKT의 4-bit NVFP4 checkpoint도 upstream vLLM 변경을 backport한 뒤 이런 
 - [docs/deck/02_실험결과_요약.md](docs/deck/02_실험결과_요약.md): 실험 9건의 날짜·리전·연결,
   병렬 구성 7종의 속도·용량 결과, 측정으로 확인한 사실, 해석(측정 아님), 한계를 정리했다.
 - [docs/report/REPORT.md](docs/report/REPORT.md): 고객용 기술 보고서이다.
+- [docs/report/REVIEW_2026-11-09.md](docs/report/REVIEW_2026-11-09.md): 2026-11-09 서빙 실험 검토 결과(판정, 문서 정정 내역, 재측정 계획)이다.
 - [docs/SERVING_DESIGN.md](docs/SERVING_DESIGN.md): 설계와 실험별 상세 결과이다.
 
 | 실험 | 날짜 | 핵심 결과 | 자세히 |
 | --- | --- | --- | --- |
 | FP8 TP8×PP2, native DSA, 노드 2대 | 2026-10-02~03 | 서빙 성공. 기능·도구·needle 통과 | 설계 문서 8장 |
-| dense 모드 대 native | 2026-10-03 | dense가 1.11~1.64배 빠르다. 128K·256K에서 needle 0/3 | 설계 문서 8.1, 발표 자료 18장 |
-| 2층 log-prob 대 공식 구현 | 증거에 기록 없음 | 2,048 위치 밖에서 dense만 오차가 커진다 | 설계 문서 8.2, 발표 자료 10장 |
+| dense 모드 대 native | 2026-10-03 | dense가 10개 조건 모두 더 빨랐다(이탈리아 북부·TCP. 배수는 같은 seed로 prefix cache 재사용이 섞여 재측정 필요). 128K·256K에서 needle 0/3(영국 남부·InfiniBand) | 설계 문서 8.1-8.2, 발표 자료 18장 |
+| 2층 log-prob 대 공식 구현 | 2026-10-02~03 | 2,048 위치 밖에서 dense만 오차가 커진다 | 설계 문서 8.2, 발표 자료 10장 |
 | 검증 실행(InfiniBand, 도구, needle, Fig. 7, TP16, EAGLE3) | 2026-10-03 | IB 20.6 GB/s, TCP 0.35 GB/s. EAGLE3는 CUDA graph 시작 실패로 eager만 측정 | 설계 문서 8.1, 발표 자료 19장 |
-| NVFP4 TP8, 노드 1대 | 2026-10-04 | GPU 8장으로 FP8 16장의 0.83~1.10배(c1) | 설계 문서 8.4, 발표 자료 16장 |
-| 정확도 부분 평가(AIME26, KoBALT, CLIcK, IFBench) | 2026-10-06 | 일부 문항만 평가. AIME26·KoBALT·IFBench는 공개값 이상, CLIcK은 85.5로 공개값 91.6보다 낮다 | 발표 자료 10장 |
+| NVFP4 TP8, 노드 1대 | 2026-10-04(동작 확인), 2026-10-21(속도 비교) | GPU 8장으로 FP8 16장의 0.83~1.10배(같은 날 측정, c1·c32, 입력 1K/8K/32K, 할당은 다름) | 설계 문서 8.4, 8.7, 발표 자료 16장 |
+| 정확도 부분 평가(AIME26, KoBALT, CLIcK, IFBench) | 2026-10-06 | 일부 문항만 평가(계획한 생성의 55%). KoBALT·IFBench는 공개값과 통계적으로 구별되지 않는다(공개값이 95% 구간 안). AIME26은 10문항뿐이라 판단할 수 없다. CLIcK은 85.5로 공개값 91.6보다 낮다 | 발표 자료 10장 |
 | Foundry BYOM 모델 전용 API, 데모 웹앱 | 2026-10 | APIM → 웹앱 → 역방향 연결 → vLLM 경로 검증 | 설계 문서 8.6, `demo/` |
-| Expert parallelism 7개 구성 | 2026-10-21 | EP만 켜면 5~12% 느리다. DP2×TP8+EP16만 동시 32에서 빠르다 | 설계 문서 8.7, 발표 자료 9·12~17장 |
+| Expert parallelism 7개 구성 | 2026-10-21 | EP만 켜면 5~12% 느리다(3쌍, 각 1회). 동시 32에서 세 입력 모두 빠른 구성은 DP2×TP8+EP16뿐이다(TP16은 1K·8K에서 ×1.04) | 설계 문서 8.7, 발표 자료 9·12~17장 |
 | Hosted A.X 에이전트(오프라인 계약, MCP 위임) | 2026-10 | 실험 코드와 테스트 | `experiments/hosted_ax/` |
 
 값은 조건마다 1회 측정이다. 실험마다 리전과 노드 간 연결(InfiniBand 또는 TCP)이 다르다.
+2026-10-03·10-04 작업은 모든 측정점에 같은 seed를 써서 일부 처리량에 prefix cache 재사용이 섞였다.
+그런 값은 재측정 전까지 사용하지 않는다.
 
 ## 현재 상태
 
 | 근거 | 결과 | 증명하지 않는 것 |
 | --- | --- | --- |
-| **ND96amsr(8 x A100) 한 대에서 SKT의 NVFP4 checkpoint, TP8, native DSA(설계 문서 8.4)** | **기능 4/4, tool 9/9, needle 9/9(최대 244,898 토큰). 1K 입력에서 동시성 32까지는 A100 16장의 FP8과 출력 속도가 같다(1.01-1.06x). 64-128에서는 0.81-0.86x, 8K-32K 입력에서는 0.64-0.98x이다. 기술 보고서 Fig. 7 조건: 1K-4K 입력에서 B200 노드 한 대의 0.47-0.49x이며, GPU당으로는 1/4이 아니라 약 절반이다. 출력 토큰당 비용은 38-56% 낮다** | expert는 W4A16으로 실행된다(A100에는 FP4 tensor core가 없다). vLLM 0.24 변경의 backport에 의존한다. KV cache는 254K-273K 토큰이다. 전체 품질 평가 |
-| **검증 실행, 같은 16 x A100, 할당 한 번(설계 문서 8.1)** | **InfiniBand가 작동한다: 노드 간 20.6 GB/s이며, TCP로는 0.35이다. Tool calling 9/9(`--enable-auto-tool-choice` 필요). SKT의 needle 테스트 9/9(최대 252,728 토큰, native). 기술 보고서 Fig. 7 조건: 1K-8K 입력에서 B200 노드 한 대의 0.43-0.51x, 16K-120K에서 0.10-0.36x** | Batch-invariant 모드와 EAGLE3는 A100에서 사용할 수 없다 |
-| **Expert parallelism, 모든 레이아웃에 같은 가중치와 벤치마크 사용(설계 문서 8.7)** | **`--enable-expert-parallel`은 스위치이다: EP 크기는 pipeline stage당 DP x TP이다. FP8 레이아웃 5개와 NVFP4 레이아웃 2개가 코드 변경 없이 native DSA를 서빙하며, 기능 4/4, tool 9/9이다. EP만으로는 처리량이 5-8% 감소한다. TP16 + EP는 동시성 32에서 TP8 x PP2의 0.83-0.98x이고, 단일 요청 TPOT는 1.4x, KV cache는 0.46x이다. 부하 상황에서 더 빠른 것은 DP2 x TP8 + EP뿐이다(출력 1.12-1.36x). 대신 단일 요청 TPOT가 약 2x이고 컨텍스트는 238,656 토큰이다** | 측정점마다 샘플이 하나이다. EPLB와 DeepEP(이미지에 A100 빌드가 없음)는 테스트하지 않았다. 입력은 최대 32K이다 |
-| **전체 688B, native DSA, 2 x ND96amsr(16 x A100 80GB), TP8 x PP2, 엔드포인트 하나** | **서빙 및 측정 완료**: 기능 6/6, reasoning, needle 12/12(최대 60K 토큰). 동시성 1-128에서 출력 50-812 tok/s. 1K-32K 컨텍스트에서 TPOT 19-21 ms | 전체 품질 평가, 운영 SLA, 비트 단위 결정성 |
-| 같은 할당, dense 모드 | 기능 결과는 같다. 10-60% 더 빠르다(61-898 tok/s). 정확한 결과는 컨텍스트 2,048 토큰까지만 보장된다 | 장문 컨텍스트 검색: 126K와 253K 토큰에서 needle을 하나도 찾지 못했다(8.1) |
-| 실제 가중치 2-layer 절단본 대 공식 Transformers FP32 sparse, 14,618개 위치 | native는 `index_topk`를 넘어서도 BF16 하한에 머문다(내부 0.0116 대비 0.0111). dense는 벗어난다(0.0123, 최대 0.22) | 전체 깊이 logit 동등성 |
+| **ND96amsr(8 x A100) 한 대에서 SKT의 NVFP4 checkpoint, TP8, native DSA(설계 문서 8.4)** | **기능 4/4, tool 9/9, needle 9/9(최대 244,898 토큰). 같은 날 측정(설계 문서 8.7, 2026-10-21)에서 FP8 A100 16장의 0.83-1.10x다(1K·8K 요청 1개 1.01-1.02x). 이 범위에는 KV 용량에 막힌 동시성 32의 8K·32K 지점이 포함되고, NVFP4는 GPU 메모리 0.92·최대 시퀀스 128(FP8은 0.90·64)로 실행했다. 이전 판의 교차 비교 값(1K 동시성 32까지 1.01-1.06x, 64-128 0.81-0.86x, 8K-32K 0.64-0.98x)과 Fig. 7 조건의 B200 대비 0.47-0.49x는 다른 날짜·리전·연결의 값과 맞댄 데다 같은 seed로 인한 prefix cache 재사용이 섞여 재측정 전까지 사용하지 않는다. 같은 날 D 기준으로는 1K에서 B200 노드의 0.47x(GPU당 약 절반)다. 출력 토큰당 비용 비교(38-56% 낮음)도 같은 이유로 사용하지 않는다** | expert는 W4A16으로 실행된다(A100에는 FP4 tensor core가 없다). vLLM 0.24 변경의 backport에 의존한다. KV cache는 254K-273K 토큰이다. 전체 품질 평가 |
+| **검증 실행, 같은 16 x A100, 할당 한 번(설계 문서 8.1)** | **InfiniBand가 작동한다: 노드 간 20.6 GB/s이며, TCP로는 0.35이다. Tool calling 9/9(`--enable-auto-tool-choice` 필요). SKT의 needle 테스트 9/9(최대 252,728 토큰, native). 기술 보고서 Fig. 7 조건: 1K-8K 입력에서 B200 노드 한 대의 0.43-0.51x(2K-8K는 prefix cache 재사용으로 부풀었다. 2026-10-21 재측정 환산 8K 0.39x), 16K-120K에서 0.10-0.36x** | Batch-invariant 모드와 EAGLE3는 A100에서 사용할 수 없다 |
+| **Expert parallelism, 모든 레이아웃에 같은 가중치와 벤치마크 사용(설계 문서 8.7)** | **`--enable-expert-parallel`은 스위치이다: EP 크기는 pipeline stage당 DP x TP이다. FP8 레이아웃 5개와 NVFP4 레이아웃 2개가 코드 변경 없이 native DSA를 서빙하며, 기능 4/4, tool 9/9이다. EP만으로는 처리량이 동시성 32에서 5-8%, 요청 1개에서 7-12% 감소한다. TP16 + EP는 동시성 32에서 TP8 x PP2의 0.83-0.98x이고, 단일 요청 TPOT는 1.4x, KV cache는 0.46x이다. 부하 상황에서 세 입력 모두 더 빠른 것은 DP2 x TP8 + EP뿐이다(출력 1.12-1.36x, EP 없는 TP16은 1K·8K에서 1.04x). 대신 단일 요청 TPOT가 약 2x이고 컨텍스트는 238,656 토큰이다** | 측정점마다 샘플이 하나이다. EPLB, round-robin expert 배치, DeepEP(이미지에 A100 빌드가 없음)는 테스트하지 않았다. 입력은 최대 32K이다 |
+| **전체 688B, native DSA, 2 x ND96amsr(16 x A100 80GB), TP8 x PP2, 엔드포인트 하나** | **서빙 및 측정 완료**: 기능 6/6, reasoning, needle 12/12(최대 60K 토큰). 요청 1개에서 출력 약 49 tok/s(1K 입력), 1K-32K 컨텍스트에서 TPOT 19-21 ms(2026-10-03, 이탈리아 북부, 노드 간 TCP, 출력 256). 동시성 8-128의 처리량(최대 812 tok/s)은 같은 seed로 인한 prefix cache 재사용이 섞여 재측정 전까지 사용하지 않는다 | 전체 품질 평가, 운영 SLA, 비트 단위 결정성 |
+| 같은 할당, dense 모드 | 기능 결과는 같다. 10개 조건 모두 더 빨랐다(배수는 같은 seed로 인한 cache 재사용이 섞여 재측정 필요). 정확한 결과는 컨텍스트 2,048 토큰까지만 보장된다 | 장문 컨텍스트 검색: 126K와 253K 토큰에서 needle을 하나도 찾지 못했다(8.1) |
+| 실제 가중치 2-layer 절단본 대 공식 Transformers FP32 sparse, 14,618개 위치 | native는 `index_topk`를 넘어서도 BF16 하한에 머문다(내부 0.0116 대비 0.0111). dense는 벗어난다(0.0123, 최대 0.23) | 전체 깊이 logit 동등성 |
 | A100에서 PR #38476 Triton 커널 | 테스트 94/94 통과 | PR의 upstream 채택 |
 | Dense 모드 == `index_topk` 이내의 DSA(CPU, 축소판 AXK2) | 통과: prefill과 cached decode가 일치한다. 차이는 `index_topk`를 넘어서만 발생한다 | 2048 토큰을 넘는 구간의 품질 |
 | 기본 vLLM 0.23.0 위의 fork overlay | 수정된 기본 파일 21개가 배포된 wheel과 바이트 단위로 같다. 추가로 Ampere MLA dtype 수정이 있다 | 다른 GPU 세대 |

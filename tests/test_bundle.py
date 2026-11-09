@@ -81,7 +81,8 @@ class BundleTests(unittest.TestCase):
             sorted(port["patched_files"]),
             sorted(["vllm/model_executor/layers/sparse_attn_indexer.py", "vllm/platforms/cuda.py",
                     "vllm/v1/attention/backends/mla/indexer.py", "vllm/v1/attention/backends/registry.py",
-                    "vllm/v1/attention/backends/mla/triton_mla_sparse.py"]))
+                    "vllm/v1/attention/backends/mla/triton_mla_sparse.py",
+                    "vllm/v1/attention/ops/mqa_logits_triton.py"]))
         for path, item in port["patched_files"].items():
             with self.subTest(path=path):
                 self.assertRegex(item["before_sha256"], r"^[0-9a-f]{64}$")

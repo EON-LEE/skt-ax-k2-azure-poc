@@ -1,6 +1,6 @@
 ﻿항목,상태,원인(요약),근거 파일
 EAGLE3 (CUDA graph 사용),시작 실패,TRITON_MLA 디코드는 요청당 쿼리 1토큰만 받음. 검증 쿼리 4토큰에서 AssertionError (max_query_len <= reorder_batch_threshold),a100-verification-and-doc-speed.json
-EAGLE3 (eager 대체),동작하나 느림,수락 길이 1.046 토큰/스텝(초안 수락률 1.5%). TP16 비투기 대비 처리량 0.19~0.23배,a100-verification-and-doc-speed.json
+EAGLE3 (eager 대체),동작하나 느림,수락 길이 1.046 토큰/스텝(초안 수락률 1.5%). CUDA graph를 쓴 TP16 비투기 대비 처리량 0.19~0.23배,a100-verification-and-doc-speed.json
 EAGLE3 + 파이프라인 병렬(PP),불가,"초안 모델이 층 2·30·58의 은닉 상태를 읽는데, PP2에서는 단계 경계를 넘는 것이 은닉 상태·잔차뿐. vLLM도 미지원으로 표기. TP16으로 대신 측정",a100-verification-and-doc-speed.json
 EAGLE3 + native DSA 포트,실행 안 함,"투기 디코딩에서 seq_lens 형태가 [batch, next_n]인데 포팅한 Triton 커널은 [batch]로 읽음. 결과 검증 불가",a100-verification-and-doc-speed.json
 batch-invariant 모드,시작 실패,"'No FP8 MoE backend supports the deployment configuration'. 배치 불변을 선언한 MoE 커널은 Triton뿐이고, 그 FP8 경로는 연산 능력 8.9가 필요(A100은 8.0)",a100-verification-and-doc-speed.json

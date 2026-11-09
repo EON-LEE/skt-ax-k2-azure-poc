@@ -17,9 +17,8 @@ def s18a():
     den = [D.NDM["dense"][n] for n in names]
     ratio = [d["output_throughput"] / n["output_throughput"] for n, d in zip(nat, den)]
     assert len(names) == 10 and all(r > 1 for r in ratio)
-    lo, hi = min(ratio), max(ratio)
     fig, ax = slide(
-        f"Dense는 native보다 {lo:.2f}~{hi:.2f}배 빠르다",
+        "Dense는 10개 조건 모두 native보다 빨랐다 (배수는 재측정 필요)",
         "같은 클러스터에서 attention 방식만 바꿨다. 출력 tok/s, 이탈리아 북부·TCP, 10개 조건",
         "이탈리아 북부, TCP(InfiniBand 끔), 2026-10-03. 전체 688B 모델, FP8, TP8×PP2, max_model_len 65,536, 최대 128 seqs, 출력 256 토큰, 조건당 1회. "
         "dense = DSA 희소 선택을 건너뛰는 모드. 영국 남부 InfiniBand 결과와 절대값을 섞어 읽지 않는다. 출처: tables/t06_dense_vs_native.csv, tables/t06b_dense_vs_native_summary.csv",
@@ -40,9 +39,10 @@ def s18a():
         ax.plot([xa, xb], [18.0, 18.0], color=MID, lw=1.6, zorder=3)
         label(ax, (xa + xb) / 2, 16.6, cap, 12, GREY, ha="center")
     su = D.ND["modes"]["native"]["startup_seconds_to_healthy"], D.ND["modes"]["dense"]["startup_seconds_to_healthy"]
-    card(ax, 3, 5.8, 62.5, 8.2, "10개 조건 모두 dense가 빠르다",
-         f"격차는 한 요청 1K에서 {ratio[0]:.2f}배, 32K에서 {ratio[2]:.2f}배, 16K 입력 동시 16개에서 {ratio[9]:.2f}배다. "
-         f"서버 시작도 dense가 {su[1]}초로 native {su[0]}초보다 짧다. 속도 이득은 다음 슬라이드의 정확도 손실과 같이 봐야 한다.", ec=NAVY, fs=11.5)
+    card(ax, 3, 5.8, 62.5, 8.2, "10개 조건 모두 dense가 빨랐다 (재측정 전 참고값)",
+         f"격차는 한 요청 1K {ratio[0]:.2f}배, 32K {ratio[2]:.2f}배, 16K·동시 16개 {ratio[9]:.2f}배다. "
+         "측정점마다 같은 시드를 써서 캐시 재사용이 섞였으므로 이 비율은 재측정 전까지 쓰지 않는다. 정확도 손실(다음 슬라이드)과 같이 본다.",
+         ec=VERM, hc=VERM, fs=11.5)
 
     st = D.ND["modes"]
     cols = [("항목", 12.5, "l"), ("native", 8.75, "c"), ("dense", 8.75, "c")]
@@ -62,7 +62,8 @@ def s18a():
     assert 1.19 < min(fig7) < 1.21 and 2.36 < max(fig7) < 2.38, fig7
     assert fig7[0] == min(fig7) and fig7[-1] == max(fig7) and fig7 != sorted(fig7)
     card(ax, 67, 16.0, 30, bottom - 1.4 - 16.0, "영국 남부·IB의 Fig. 7 조건",
-         f"동시 32개, 입력 1K~120K 8개 길이에서 dense÷native 총 tok/s는 {min(fig7):.2f}배에서 {max(fig7):.2f}배까지이며, 대체로 입력이 길수록 커진다.", ec=ORANGE, hc=VERM, fs=11.5)
+         f"동시 32개, 입력 1K~120K에서 dense÷native 총 tok/s는 {min(fig7):.2f}~{max(fig7):.2f}배다. 2K~8K는 같은 시드로 캐시 재사용이 섞였다.",
+         ec=ORANGE, hc=VERM, fs=11.5)
     card(ax, 67, 5.8, 30, 9.0, "해석 (프로파일링하지 않음)",
          "attention의 희소 선택 단계를 건너뛰어 긴 입력에서 이득이 커 보이나, 시간 비중은 재지 않았다.", ec=GREY, hc=GREY, fs=11.5)
     save(fig, "s18a_dense-vs-native-speed.png")
@@ -206,14 +207,13 @@ def s20():
     b0_c32 = [D.ratio("B0", s, 32) for s in SIZES]
     assert [x > 1 for x in b0_c32] == [True, True, False]
     kv_b0 = D.kv_list("B0")[0] / D.kv_list("A")[0]
-    nd = [D.NDM["dense"][n]["output_throughput"] / D.NDM["native"][n]["output_throughput"] for n in D.ND_NAMES]
-    spec = [D.SPEC[s]["tp16_dense_eagle3"]["total_token_throughput"] / D.SPEC[s]["tp16_dense"]["total_token_throughput"] for s in sorted(D.SPEC)]
+    spec =  [D.SPEC[s]["tp16_dense_eagle3"]["total_token_throughput"] / D.SPEC[s]["tp16_dense"]["total_token_throughput"] for s in sorted(D.SPEC)]
     kva, kvd = D.kv_list("A")[0], D.kv_list("D")[0]
     fig, ax = slide(
         "정리: 목표에 따라 고르는 구성",
         "측정한 범위 안에서의 선택표다. 모든 값은 조건당 1회 측정이다",
-        "FP8 구성과 NVFP4는 영국 남부 2026-10-21 작업(출력 1,024 토큰, c1 = 한 요청, c32 = 32개 동시, 입력 1K/8K/32K). dense·EAGLE3는 2026-10-03 작업. "
-        "배수는 기준 대비이며 FP8은 A(TP8×PP2), NVFP4는 D(NVFP4 TP8) 기준이다. 출처: tables/t01_layout_summary.csv, t06, t09",
+        "FP8 구성과 NVFP4는 영국 남부 2026-10-21 작업(출력 1,024 토큰, c1 = 한 요청, c32 = 32개 동시, 입력 1K/8K/32K). dense 속도는 2026-10-03 이탈리아 북부·TCP, "
+        "needle·EAGLE3는 2026-10-03 영국 남부·IB 작업. 배수는 기준 대비이며 FP8은 A(TP8×PP2), NVFP4는 D(NVFP4 TP8) 기준이다. 출처: tables/t01_layout_summary.csv, t06, t09",
     )
     cols = [("목표·상황", 20, "l"), ("고를 구성", 20, "l"), ("근거와 주의", 54, "l")]
     rows = [
@@ -222,19 +222,19 @@ def s20():
         [("긴 문맥, KV 용량", {"b": True}), ("A TP8×PP2", {"b": True, "c": GREEN}),
          f"KV {kva:,}토큰, 컨텍스트 262,144, 32K 동시 실행 {D.running32k('A')}개. D는 KV {kvd:,}토큰, 동시 {D.running32k('D')}개."],
         [("동시 요청이 많고 입력 32K 이하", {"b": True}), ("C2 DP2×TP8+EP16", {"b": True, "c": GREEN}),
-         f"c32 출력 ×{trio(c2_c32)}. 단 c1 TPOT ×{trio(c2_tp)}, 컨텍스트 {D.max_ctx('C2'):,}."],
+         f"c32 출력 ×{trio(c2_c32)}(1회 측정, 조건 혼재). 단 c1 TPOT ×{trio(c2_tp)}, 컨텍스트 {D.max_ctx('C2'):,}."],
         [("GPU 8장만 쓸 때", {"b": True}), ("D NVFP4 TP8 (노드 1개)", {"b": True, "c": GREEN}),
          f"A 대비 c1 ×{trio(d_c1)}, c32 ×{trio(d_c32)}. 정확도 동등성은 기능·도구·needle만 확인."],
-        [("EP만 켜기", {"b": True}), ("효과 없음", {"b": True, "c": VERM}),
-         f"18개 비교 모두 켠 쪽이 느리다(×{rng(ep)}). EPLB·DeepEP은 시험하지 않았다."],
+        [("EP만 켜기", {"b": True}), ("이득 없음(5~12% 느림)", {"b": True, "c": VERM}),
+         f"18개 비교 모두 켠 쪽이 느리다(×{rng(ep)}, 3쌍 각 1회). round-robin 배치·EPLB는 시험하지 않았다(DeepEP은 A100 미지원)."],
         [("TP16 (노드 2개에 걸침)", {"b": True}), ("A와 비슷하거나 낮다", {"b": True, "c": VERM}),
          f"c1 출력 ×{trio(b0_c1)}, c32 ×{trio(b0_c32)}, KV ×{kv_b0:.2f}."],
         [("dense 모드", {"b": True}), ("입력+출력 약 60K 이하만", {"b": True, "c": ORANGE}),
-         f"native보다 ×{rng(nd)} 빠르나, 128K·256K에서 needle 0/3. 60K~128K는 미시험."],
+         "10개 조건 모두 native보다 빨랐으나(배수는 재측정 필요), 128K·256K에서 needle 0/3. 60K~128K는 미시험."],
         [("EAGLE3, batch-invariant", {"b": True}), ("A100에서 이득 확인 못 함", {"b": True, "c": VERM}),
-         f"EAGLE3(eager)는 CUDA graph 일반 TP16의 ×{rng(spec)}. batch-invariant는 시작 실패."],
+         f"EAGLE3(eager)는 CUDA graph 일반 TP16의 ×{rng(spec)}(4K·8K는 같은 시드 측정). batch-invariant는 시작 실패."],
     ]
-    bottom = table(ax, 3, 46.8, cols, rows, fs=11.5, hfs=12, padx=0.8, pady=0.8)
+    bottom = table(ax, 3, 46.8, cols, rows, fs=11.5, hfs=12, padx=0.8, pady=0.62)
     card(ax, 3, 4.6, 94, max(bottom - 1.2 - 4.6, 5.6), "다음 단계",
          "① 목표 지연·처리량, 입력 길이, 동시 요청 수를 먼저 합의한다.\n"
          "② 그 조건으로 같은 구성을 반복 측정한다(지금은 조건당 1회).\n"
