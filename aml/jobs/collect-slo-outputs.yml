@@ -1,0 +1,36 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: collect-slo-outputs
+description: >-
+  Read a finished benchmark-protocol job's private artifacts from inside the managed VNet (storage is private
+  by policy) and return them through the job record: the vLLM start-up facts (collect_run_outputs.py) and the
+  compact package that bench_stats.py analyses (per point the gates, steady-state data, per-engine counters,
+  GPU and InfiniBand telemetry; parity against A of the same round; effective configs, NCCL and clean-state
+  summaries), with addresses, job folders and host names removed. Replace __RUN__ with the finished job name
+  before rendering. The scripts are downloaded from the pinned commit of this public repository.
+compute: azureml:cpu-lp
+environment:
+  image: docker.io/library/python:3.12-slim
+identity:
+  type: user_identity
+inputs:
+  run_outputs:
+    type: uri_folder
+    mode: download
+    path: azureml://datastores/workspaceartifactstore/paths/ExperimentRun/dcid.__RUN__/outputs/
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/bench/bench_stats.py &&
+  pip install -q --no-cache-dir "mlflow-skinny>=2.16" azureml-mlflow &&
+  python /tmp/axk2src/collect_run_outputs.py ${{inputs.run_outputs}} &&
+  python /tmp/axk2src/bench/bench_stats.py package ${{inputs.run_outputs}} --report
+limits:
+  timeout: 3600

@@ -1,0 +1,45 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: serving-diag-2xND96amsr-A100
+description: >-
+  Diagnostics before the protocol rounds (docs/BENCHMARK_PROTOCOL.md), on two 8xA100-80GB nodes: the DSA-port
+  kernel tests including the regression test of the indexer-logits store fix, then Part R and parity for A at
+  the common max-model-len and at the auto-fitted length (artifact A1), C1 with linear and with round-robin
+  expert placement (artifact A8), and TP16 without and with decode context parallel 2 (does the SM80 port
+  honour DCP: start, KV tokens, DCP lines, parity, short load). A phase that fails is recorded and the job
+  goes on. ROUND 0 keeps these seeds apart from the rounds. The scripts are downloaded from the pinned commit
+  of this public repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 2
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  PHASE_PLAN: "diag-A diag-A-maxlen diag-C1 diag-C1rr diag-B0 diag-B0dcp"
+  ROUND: "0"
+  IB_PROBE: "1"
+  FULL_HEALTH_TIMEOUT: "1800"
+  DOWNLOAD_TIMEOUT: "5400"
+  RUN_KERNEL_TESTS: "1"
+  JOIN_TIMEOUT: "5400"
+  TP: "8"
+  PP: "2"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:4237c6a60cec6ae449854870d01a42665a1166aa
+limits:
+  timeout: 18000

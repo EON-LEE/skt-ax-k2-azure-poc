@@ -105,13 +105,13 @@ BENCH_KEYS = ["completed", "request_throughput", "output_throughput", "total_tok
               "p99_tpot_ms", "median_itl_ms", "p99_itl_ms", "median_e2el_ms"]
 
 
-def bench(args, name, concurrency, prompts, input_len, output_len, out_dir):
+def bench(args, name, concurrency, prompts, input_len, output_len, out_dir, seed=2026):
     filename = f"bench-{name}.json"
     command = ["vllm", "bench", "serve", "--backend", "openai", "--base-url", args.base,
                "--endpoint", "/v1/completions", "--model", MODEL, "--tokenizer", args.tokenizer,
                "--dataset-name", "random", "--random-input-len", str(input_len),
                "--random-output-len", str(output_len), "--num-prompts", str(prompts),
-               "--max-concurrency", str(concurrency), "--ignore-eos", "--seed", "2026",
+               "--max-concurrency", str(concurrency), "--ignore-eos", "--seed", str(seed),
                "--percentile-metrics", "ttft,tpot,itl,e2el", "--metric-percentiles", "50,90,99",
                "--save-result", "--result-dir", str(out_dir), "--result-filename", filename]
     began = time.time()
@@ -121,7 +121,8 @@ def bench(args, name, concurrency, prompts, input_len, output_len, out_dir):
     except subprocess.TimeoutExpired as exc:
         returncode, stderr = -1, f"timeout: {exc}"
     record = {"name": name, "concurrency": concurrency, "num_prompts": prompts, "input_len": input_len,
-              "output_len": output_len, "returncode": returncode, "wall_seconds": round(time.time() - began, 1)}
+              "output_len": output_len, "seed": seed, "returncode": returncode,
+              "wall_seconds": round(time.time() - began, 1)}
     path = Path(out_dir) / filename
     if returncode == 0 and path.exists():
         data = json.loads(path.read_text())
@@ -220,7 +221,8 @@ def run_full(args):
         "chunks": pieces, "total_seconds": round(total, 2),
         "decode_chunks_per_second": round((pieces - 1) / (total - (first_token - began)), 2)
         if first_token and pieces > 1 else None}
-    result["benchmarks"] = [bench(args, *spec, out_dir) for spec in benchmark_plan(args.max_model_len)]
+    result["benchmarks"] = [bench(args, *spec, out_dir, seed=2027 + index)
+                            for index, spec in enumerate(benchmark_plan(args.max_model_len))]
     found = [n for n in needles if "found" in n]
     result["summary"] = {
         "functional_passed": sum(f["passed"] for f in functional), "functional_total": len(functional),

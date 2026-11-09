@@ -1,0 +1,46 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: slo-nvfp4-2replica-2xND96amsr-A100
+description: >-
+  D x 2 scaling check (docs/BENCHMARK_PROTOCOL.md): the official skt/A.X-K2-NVFP4 with the SM80 Marlin port.
+  dx1-D serves D (TP8) on node0 alone; dx2-D serves one D per node, both started with the protocol's flags,
+  behind lb_proxy.py on node0 (least outstanding requests, streamed responses). Both run Poisson W1 and W2
+  grids with goodput; pass when lambda*(dx2) >= 1.9 x lambda*(dx1) for W1 and W2 at the standard SLO.
+  NVFP4 quality equivalence is a separate prerequisite. The scripts are downloaded from the pinned commit of
+  this public repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 2
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  FULL_REPO: skt/A.X-K2-NVFP4
+  NVFP4_SM80_PORT: "1"
+  PHASE_PLAN: "dx1-D dx2-D"
+  ROUND: "1"
+  IB_PROBE: "1"
+  FULL_HEALTH_TIMEOUT: "1800"
+  DOWNLOAD_TIMEOUT: "5400"
+  RUN_KERNEL_TESTS: "0"
+  JOIN_TIMEOUT: "5400"
+  TP: "8"
+  PP: "2"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:9e2e804e80f8d1b3afba5d7938173cec1ed46b49
+limits:
+  timeout: 21600

@@ -1,0 +1,49 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: slo-round-2xND96amsr-A100
+description: >-
+  One round of the pre-registered serving protocol (docs/BENCHMARK_PROTOCOL.md, aml/src/bench/slo_protocol.json)
+  on two 8xA100-80GB nodes; every round is a separate job (set ROUND at submission). PHASE_PLAN slo-round runs
+  A (FP8 TP8 x PP2), then C2 (FP8 DP2 x TP8 + EP16) and D (NVFP4 TP8 on node0) in the round's pre-registered
+  order, C2s in round 1 only, then A2 (A relaunched) and, in round 1, the capacity phases. Every layout serves
+  with the protocol's common flags, a pinned max-model-len and API server count, no eager fallback, and FP8
+  phases only over InfiniBand; each launch runs parity, Part R, closed-loop S1, Poisson W1/W2 grids with
+  goodput, real-text W1 (A, C2) and, in round 3, a 45-minute soak (SOAK_RATES). Node0 stages both checkpoints
+  and refuses to start if its disk cannot hold them. The scripts are downloaded from the pinned commit of
+  this public repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 2
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  PHASE_PLAN: "slo-round"
+  ROUND: "1"
+  NVFP4_IN: "hf:9e2e804e80f8d1b3afba5d7938173cec1ed46b49"
+  NVFP4_SM80_PORT: "1"
+  IB_PROBE: "1"
+  FULL_HEALTH_TIMEOUT: "1800"
+  DOWNLOAD_TIMEOUT: "5400"
+  RUN_KERNEL_TESTS: "1"
+  JOIN_TIMEOUT: "5400"
+  TP: "8"
+  PP: "2"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:4237c6a60cec6ae449854870d01a42665a1166aa
+limits:
+  timeout: 43200

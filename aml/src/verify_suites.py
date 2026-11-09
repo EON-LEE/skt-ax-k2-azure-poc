@@ -402,7 +402,7 @@ def sweep(args, isls, prompts_for, suite):
     for isl in isls:
         prompts = prompts_for(isl)
         timeout = 1800 if isl <= 16384 else 3600 if isl <= 32768 else 5400
-        record = bench(args, f"isl{isl}", 32, prompts, isl, 1024, timeout)
+        record = bench(args, f"isl{isl}", 32, prompts, isl, 1024, timeout, seed=2026 + isl)
         doc = DOC_FIG7.get(isl)
         if doc and record.get("total_token_throughput"):
             record["doc_fig7_b200_total_tok_s"], record["doc_fig7_b200_output_tok_s"] = doc
@@ -416,7 +416,7 @@ def sweep(args, isls, prompts_for, suite):
     note = ("(vLLM's B200 default); same conditions as the tech report Fig. 7 (B200 single node)"
             if batched == 8192 else "(the tech report's B200 run used 8192)")
     return {"method": "vllm bench serve --dataset-name random --ignore-eos, concurrency 32, output 1024 tokens, "
-                      f"server --max-num-batched-tokens {batched} {note}",
+                      f"a seed per point; server --max-num-batched-tokens {batched} {note}",
             "points": points}
 
 
@@ -436,12 +436,12 @@ def suite_sweepsub(args):
 
 def suite_latency(args):
     points = []
-    for name, concurrency, prompts, input_len, output_len in benchmark_plan(args.max_model_len):
-        record = bench(args, name, concurrency, prompts, input_len, output_len, 3600)
+    for index, (name, concurrency, prompts, input_len, output_len) in enumerate(benchmark_plan(args.max_model_len)):
+        record = bench(args, name, concurrency, prompts, input_len, output_len, 3600, seed=2027 + index)
         points.append(record)
         emit(args.out_dir, args.tag, f"bench-{name}", record)
     return {"method": "client_tests.benchmark_plan, the plan of the earlier 16-GPU FP8 table: vllm bench serve "
-                      "--dataset-name random --ignore-eos --seed 2026, 256 output tokens; server "
+                      "--dataset-name random --ignore-eos, a seed per point, 256 output tokens; server "
                       f"--max-num-batched-tokens {args.max_num_batched_tokens}",
             "points": points}
 
