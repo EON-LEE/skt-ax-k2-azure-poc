@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.request
 import warnings
@@ -97,7 +98,7 @@ def protocol_functions(folder, extra_stubs=""):
     (folder / "pkgs" / "mlflow.py").write_text(FAKE_MLFLOW)
     (folder / "functions.sh").write_text(PROTOCOL_SH[PROTOCOL_SH.index("bench_model() {"):])
     return f"""
-        set -u; SRC={SRC}; BENCH={SRC}/bench; OUT={folder}; ROUND=1; FULL_NATIVE={folder}; FULL_HEALTH_TIMEOUT=5
+        set -uo pipefail; SRC={SRC}; BENCH={SRC}/bench; OUT={folder}; ROUND=1; FULL_NATIVE={folder}; FULL_HEALTH_TIMEOUT=5
         PKGS={folder}/pkgs; PATH={folder}/bin:$PATH; SERVER_PID=""; NODE_IP=127.0.0.1; BENCH_STOP_SETTLE=0
         BENCH_PACKAGE_DIR={folder}/package-view
         . {folder}/functions.sh
@@ -228,13 +229,15 @@ class EntryHookTests(unittest.TestCase):
         self.assertEqual(len(slo_calls), 1, "rounds never relaunch: only the screening has the length fallback")
 
     def pd_stubs(self, folder, smoke='{"ok": true, "reason": "ok"}', replica_ip="10.1.2.3", preflight="default",
-                 descs="2 'Registering descs' lines, 244 descriptors, 1 of zero length"):
+                 descs="2 'Registering descs' lines, 244 descriptors, 1 of zero length", peer_alive=True):
         """protocol.sh's functions with the second server, the NIXL preflight, the proxy, the smoke test, node1's log
-        and the client stubbed."""
+        and the client stubbed. node1's server answers /health while peer_alive; otherwise it has exited."""
         return protocol_functions(folder, f"""
             bench_model() {{ echo {folder}; }}
-            bench_replica() {{ echo "$*" >> {folder}/replica; [ "$1" = start ] && echo {replica_ip}; return 0; }}
+            bench_replica() {{ echo "$*" >> {folder}/replica; [ "$1" = start ] && echo {replica_ip}
+                               [ "$1" != alive ] || {'true' if peer_alive else 'false'}; }}
             bench_wait_url() {{ echo "$1" >> {folder}/urls; return 0; }}
+            bench_url_ok() {{ echo "$1" >> {folder}/urls; {'true' if peer_alive else '[[ $1 != *10.1.2.3* ]]'}; }}
             bench_effective() {{ echo '{{"problems": []}}'; }}
             report() {{ echo "$*" >> {folder}/reports; }}
             timeout() {{ echo "$1" >> {folder}/limits; shift; "$@"; }}
@@ -456,6 +459,28 @@ class EntryHookTests(unittest.TestCase):
         failure = reports[reports.index("node0.scr-PD.failure --text "):]
         self.assertTrue(failure.startswith('node0.scr-PD.failure --text {"node0": [{"kind": "registering"'), failure[:200])
         self.assertEqual(client, "", "no suites")
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_a_second_server_that_exits_ends_the_peer_health_wait(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            (folder / "bin").mkdir()
+            (folder / "bin" / "vllm").write_text("#!/bin/bash\n")
+            (folder / "bin" / "vllm").chmod(0o755)
+            stubs = self.pd_stubs(folder, peer_alive=False) + "BENCH_POLL_SECONDS=0; FULL_HEALTH_TIMEOUT=60\n"
+            began = time.time()
+            result = subprocess.run(["bash", "-c", stubs + 'protocol_phase scr-Dx2; echo "rc=$?"'],
+                                    capture_output=True, text=True, timeout=120)
+            seconds = time.time() - began
+            phases = (folder / "phases").read_text().splitlines()
+            actions = [line.split()[0] for line in (folder / "replica").read_text().splitlines()]
+            urls = (folder / "urls").read_text().splitlines()
+        self.assertIn("rc=1", result.stdout, result.stderr)
+        self.assertEqual(phases, ["scr-Dx2 failed the second server on node1 exited before it became healthy"])
+        self.assertEqual((actions[0], actions[-1]), ("start", "stop"))
+        self.assertIn("alive", actions, "node1's process is checked during the wait")
+        self.assertEqual(len([u for u in urls if "10.1.2.3" in u]), 6, "found on the sixth poll, long before the time limit")
+        self.assertLess(seconds, 60)
 
     @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
     def test_a_dirty_node_is_reclaimed_once_and_the_event_recorded(self):

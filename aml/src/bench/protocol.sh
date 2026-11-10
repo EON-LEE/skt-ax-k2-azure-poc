@@ -90,8 +90,11 @@ bench_model() {  # <fp8|nvfp4>: the local checkpoint directory (waits for node0'
   echo "$PWD/hub-model-nvfp4"
 }
 
-bench_alive() {  # a live (not zombie) process in the session of $1
-  if command -v ps > /dev/null; then ps -o stat= -s "$1" 2>/dev/null | grep -qv '^Z'; else kill -0 -- "-$1" 2>/dev/null; fi
+bench_alive() {  # a live (not zombie) process in the session of $1; no pipeline, so pipefail cannot turn it false
+  local state
+  command -v ps > /dev/null || { kill -0 -- "-$1" 2>/dev/null; return; }
+  for state in $(ps -o stat= -s "$1" 2>/dev/null); do [[ $state == Z* ]] || return 0; done
+  return 1
 }
 
 bench_stop() {  # stops the whole session of SERVER_PID: API servers, engine cores, local workers
@@ -327,6 +330,25 @@ bench_wait_url() {  # <url> <seconds>
   done
 }
 
+# bench_wait_peer <url>: node1's second server answering /health within FULL_HEALTH_TIMEOUT. Node1's process is
+# checked every sixth poll, so the wait ends as soon as it has exited; on a failure note says which.
+bench_wait_peer() {
+  local began polls=0
+  began=$(date +%s)
+  until bench_url_ok "$1"; do
+    polls=$((polls + 1))
+    if [ $((polls % 6)) = 0 ] && ! bench_replica alive > /dev/null 2>&1; then
+      note="the second server on node1 exited before it became healthy"
+      return 1
+    fi
+    if [ $(( $(date +%s) - began )) -gt "$FULL_HEALTH_TIMEOUT" ]; then
+      note="the second server never became healthy"
+      return 1
+    fi
+    sleep "${BENCH_POLL_SECONDS:-10}"
+  done
+}
+
 bench_has_peer() {  # does node1 run a process of this phase (a second server or headless DP engines)?
   [ "${SPEC_REPLICAS:-1}" -gt 1 ] || [ "${SPEC_LAUNCHER:-}" = mp-multinode ]
 }
@@ -358,10 +380,7 @@ bench_launch() {
     note="the server never became healthy (no --enforce-eager retry in a comparison phase)"
     return 1
   fi
-  if [ -n "$peer" ] && ! bench_wait_url "http://$peer:8000/health" "$FULL_HEALTH_TIMEOUT"; then
-    note="the second server never became healthy"
-    return 1
-  fi
+  [ -z "$peer" ] || bench_wait_peer "http://$peer:8000/health"
 }
 
 # bench_package [exit]: the job's cumulative results package (bench_stats.py package), reported to the job record
@@ -446,8 +465,9 @@ bench_preflight() {
   return 0
 }
 
-bench_vram_host() {  # <tag>: did UCX type a VRAM registration as host memory in either PD server's log?
-  { cat "$OUT/vllm-$1.log" 2>/dev/null; bench_peer_tail "$1"; } | grep -q "VRAM memory is detected as host"
+bench_vram_host() {  # <tag>: did UCX type a VRAM registration as host memory in either PD server's log? (no pipeline)
+  grep -q "VRAM memory is detected as host" "$OUT/vllm-$1.log" 2>/dev/null && return 0
+  [[ $(bench_peer_tail "$1") == *"VRAM memory is detected as host"* ]]
 }
 
 # bench_pd_descs <tag>: vLLM NixlConnector's "Registering descs" lines (debug level) of both PD servers, with every
