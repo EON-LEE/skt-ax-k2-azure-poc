@@ -1,7 +1,8 @@
 """NIXL/UCX VRAM-registration preflight of a PD phase (vllm/vllm-openai:v0.23.0-cu129, nixl-cu12 1.2.0 with its
-bundled UCX). protocol.sh runs it on node0 and node1 before the PD servers start, once with the defaults and once
-with UCX_MEMTYPE_CACHE=n (node_tools.py preflight). The screening's PD launch failed in register_kv_caches with
-NIXL_ERR_BACKEND, "VRAM memory is detected as host by UCX"; this checks what that depends on:
+bundled UCX). protocol.sh runs it on node0 and node1 before the PD servers start, with the job's UCX environment and
+with the overrides of node_tools.PREFLIGHT_VARIANTS (UCX_TLS=all and UCX_NET_DEVICES=all, then also
+UCX_MEMTYPE_CACHE=n). The screening's PD launch failed in register_kv_caches with NIXL_ERR_BACKEND, "VRAM memory is
+detected as host by UCX" (the job runtime's UCX_TLS=tcp leaves out cuda_copy); this checks what that depends on:
 
   - the loader cache has the CUDA libraries UCX's CUDA module needs (libcuda, libnvidia-ml, libcudart);
   - UCX's CUDA transport (nixl_cu12.libs/ucx/libuct_cuda) is mapped once a NIXL agent exists;

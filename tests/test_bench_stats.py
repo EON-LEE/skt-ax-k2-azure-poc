@@ -722,13 +722,17 @@ class SelectionTests(unittest.TestCase):
         fp8, nvfp4, two = self.packages()
         two["source"] = "screen-nvfp4-2node"
         rerun = {"rounds": [0], "plans": {}, "parity": {"scr-PD": self.GOOD}, "start": {}, "source": "screen-nvfp4-pd",
-                 "preflight": {"scr-PD": {"choice": "UCX_MEMTYPE_CACHE=n", "node0": {}, "node1": {}}},
+                 "preflight": {"scr-PD": {"choice": "UCX_TLS=all UCX_NET_DEVICES=all", "node0": {}, "node1": {},
+                                          "choice_env": {"UCX_TLS": "all", "UCX_NET_DEVICES": "all"},
+                                          "job_env": {"node0": {"UCX_TLS": "tcp", "UCX_NET_DEVICES": "eth0"}}}},
                  "phases": [{"phase": "scr-Dref", "status": "passed"}, {"phase": "scr-PD", "status": "passed"}],
                  "points": open_points(0, "scr-PD", [0.5, 1.2, 2.0, 3.0], [1.0, 0.95, 0.5, 0.2], [1, 2, 3, 4])}
         selection = bs.select([fp8, nvfp4, two, rerun], PROTOCOL)
         self.assertEqual({k: (v["status"], v["source"]) for k, v in selection["pd"].items()},
                          {"scr-PD": ("failed", "screen-nvfp4-2node"), "scr-PD@screen-nvfp4-pd": ("passed", "screen-nvfp4-pd")})
-        self.assertEqual(selection["pd"]["scr-PD@screen-nvfp4-pd"]["preflight"], {"choice": "UCX_MEMTYPE_CACHE=n"})
+        self.assertEqual(selection["pd"]["scr-PD@screen-nvfp4-pd"]["preflight"],
+                         {"choice": "UCX_TLS=all UCX_NET_DEVICES=all", "choice_env": {"UCX_TLS": "all", "UCX_NET_DEVICES": "all"},
+                          "job_env": {"node0": {"UCX_TLS": "tcp", "UCX_NET_DEVICES": "eth0"}}}, "what the job had and what PD got")
         pairs = {(p["name"], p["x"]): p for p in selection["pairs"] if p["name"].startswith("PD against")}
         rerun_vs_d = pairs[("PD against D", "scr-PD@screen-nvfp4-pd")]
         self.assertEqual((rerun_vs_d["base"], rerun_vs_d["cross_job"]), ("scr-Dx1", True))
@@ -737,7 +741,8 @@ class SelectionTests(unittest.TestCase):
         self.assertFalse(pairs[("PD against D", "scr-PD")]["cross_job"], "the first PD's own job had Dx1")
         markdown = bs.selection_markdown(selection)
         self.assertIn("PD against D (scr-PD@screen-nvfp4-pd / scr-Dx1, cross-job)", markdown)
-        self.assertIn("PD (experimental, never selected) scr-PD@screen-nvfp4-pd: passed; NIXL preflight: UCX_MEMTYPE_CACHE=n", markdown)
+        self.assertIn("PD (experimental, never selected) scr-PD@screen-nvfp4-pd: passed; NIXL preflight: UCX_TLS=all UCX_NET_DEVICES=all",
+                      markdown)
 
     def test_a_failed_reference_selects_nothing_in_its_family(self):
         packages = self.packages()

@@ -1035,7 +1035,7 @@ def screen_launches(packages, protocol):
                 "invalid_points": sorted({p["id"] for p in groups.get(phase, []) if not p["valid"]}),
                 "reclaim": (pkg.get("reclaim") or {}).get(phase),
                 "preflight": {k: v for k, v in ((pkg.get("preflight") or {}).get(phase) or {}).items()
-                              if k in ("choice", "reason")} or None,
+                              if k in ("choice", "choice_env", "job_env", "reason")} or None,
                 "missing_part": phase in (pkg.get("missing_launches") or [])}
     return launches
 
