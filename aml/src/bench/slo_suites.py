@@ -126,6 +126,7 @@ def phase_spec(protocol, phase, round_=None):
     length = server["max_model_len"][entry.get("max_model_len", "performance")]
     seqs = layout.get("max_num_seqs", server["max_num_seqs"])
     batched = layout.get("max_num_batched_tokens", server["max_num_batched_tokens"])
+    mem = layout.get("gpu_memory_utilization", server["gpu_memory_utilization"])
     options = entry.get("options", {})
     replicas = entry.get("replicas", 1)
     roles = layout.get("roles") or {}
@@ -134,7 +135,7 @@ def phase_spec(protocol, phase, round_=None):
 
     def flags(extra):
         return [*server["launcher_flags"], "--max-model-len", str(length), "--gpu-memory-utilization",
-                str(server["gpu_memory_utilization"]), "--max-num-seqs", str(seqs), *layout["args"], *extra,
+                str(mem), "--max-num-seqs", str(seqs), *layout["args"], *extra,
                 "--max-num-batched-tokens", str(batched), *server["common_flags"]]
 
     if multinode:
@@ -149,7 +150,7 @@ def phase_spec(protocol, phase, round_=None):
     return {"phase": phase, "label": entry.get("label", entry["layout"]), "layout": entry["layout"],
             "rates_key": "Dx2" if options.get("slo", {}).get("rate_set") == "dx2" else rates_key(protocol, entry["layout"]),
             "checkpoint": layout["checkpoint"], "nodes": layout["nodes"], "replicas": replicas,
-            "max_model_len": length, "max_num_seqs": seqs, "gpu_memory_utilization": server["gpu_memory_utilization"],
+            "max_model_len": length, "max_num_seqs": seqs, "gpu_memory_utilization": mem,
             "max_num_batched_tokens": batched, "args": args, "peer_args": peer, "launcher": launcher,
             "proxy": entry.get("proxy") or ("lb" if replicas > 1 else ""),
             "env": {**server["env"], **server["benchmark_env"], **layout.get("env", {})},

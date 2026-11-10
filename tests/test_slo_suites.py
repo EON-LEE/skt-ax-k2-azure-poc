@@ -94,7 +94,11 @@ class PlanTests(unittest.TestCase):
                 capacity = PROTOCOL["phases"][phase].get("max_model_len") == "capacity"
                 self.assertEqual(pairs["--max-model-len"], "-1" if capacity else "131072")
                 self.assertEqual(pairs["--api-server-count"], "1")
-                self.assertEqual(pairs["--gpu-memory-utilization"], "0.9")
+                # Only a layout that records its own value (PD, see its diagnosis note) leaves the common 0.9.
+                layout = ss.resolve_layout(PROTOCOL, PROTOCOL["phases"][phase]["layout"])
+                self.assertEqual(pairs["--gpu-memory-utilization"],
+                                 str(layout.get("gpu_memory_utilization", server["gpu_memory_utilization"])))
+                self.assertEqual("gpu_memory_utilization" in layout, PROTOCOL["phases"][phase]["layout"] == "PD")
                 self.assertEqual(flags.count("--max-model-len"), 1)
                 self.assertIn("--async-scheduling", flags)
                 self.assertNotIn("--enforce-eager", flags)
@@ -370,6 +374,14 @@ class ScreeningLayoutTests(unittest.TestCase):
         self.assertEqual([a for a in pd["args"] if a not in pd["peer_args"]], [json.dumps(roles[0])])
         self.assertEqual(pd["node_env"], ["VLLM_NIXL_SIDE_CHANNEL_HOST"])
         self.assertEqual(pd["env"]["VLLM_NIXL_SIDE_CHANNEL_PORT"], "5600")
+        # PD alone leaves GPU headroom: the prefill server ran out of memory at the common 0.9 (layout note).
+        self.assertEqual(pd["gpu_memory_utilization"], 0.85)
+        self.assertEqual([flag_map(a)["--gpu-memory-utilization"] for a in (pd["args"], pd["peer_args"])], ["0.85", "0.85"])
+        for phase in ("scr-D", "scr-Dref", "scr-Dx2", "scr-A", "scr-C4m"):
+            with self.subTest(common_memory=phase):
+                spec = ss.phase_spec(PROTOCOL, phase, 0)
+                self.assertEqual(flag_map(spec["args"])["--gpu-memory-utilization"],
+                                 str(PROTOCOL["server"]["gpu_memory_utilization"]))
         dx2 = ss.phase_spec(PROTOCOL, "scr-Dx2", 0)
         self.assertEqual((dx2["proxy"], dx2["peer_args"]), ("lb", dx2["args"]))
         self.assertEqual(ss.phase_spec(PROTOCOL, "scr-C4", 0)["peer_args"], [])
