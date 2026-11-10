@@ -481,7 +481,7 @@ def package(root, protocol=None):
     phases = [json.loads(line) for line in (root / "node0" / "phases.jsonl").read_text().splitlines()
               if line.strip()] if (root / "node0" / "phases.jsonl").exists() else []
     extra = {kind: {path.stem[len(kind) + 1:]: load_json(path) for path in sorted((root / "node0").glob(f"{kind}-*.json"))}
-             for kind in ("effective", "nccl", "lb-stats", "clean", "start", "reclaim")}
+             for kind in ("effective", "nccl", "lb-stats", "clean", "start", "reclaim", "peer", "preflight", "descs")}
     # Tails of the second server's log (node1), pulled by node_tools.py pull for two-server phases.
     tails = {path.name[len("tail-vllm-"):-len("-replica1.log")]: path.read_text(errors="replace")[-TAIL_CHARS:]
              for node in nodes for path in sorted((root / node).glob("tail-vllm-*-replica1.log"))}
@@ -986,31 +986,66 @@ def point_peaks(point):
     return {"peak_kv_cache_usage": kv, "peak_running": running}
 
 
+def peer_engines(protocol, phase):
+    """Does node1 run engines of this phase that log only to node1's own file? A second server (replicas: Dx2, PD)
+    or an mp-multinode layout's headless DP engines do; Ray's workers on node1 log through node0's server."""
+    entry = phase_entry(protocol, phase)
+    return entry.get("replicas", 1) > 1 or resolve_layout(protocol, entry["layout"]).get("launcher") == "mp-multinode"
+
+
+def kv_from_text(text):
+    """KV cache sizes logged after the last bench_replica start mark of (the tail of) a node1 log."""
+    text = (text or "").rsplit("=== axk2 replica start", 1)[-1]
+    return [int(value.replace(",", "")) for value in re.findall(r"GPU KV cache size: ([\d,]+) tokens", text)]
+
+
 def screen_launches(packages, protocol):
     """Per screening launch (scr-*): phase result, start record, effective config, screen facts and steps,
-    parity against the job's reference, metrics of its valid points (with flags, peaks and lambda*)."""
+    parity against the job's reference, metrics of its valid points (with flags, peaks and lambda*).
+    max_model_len is the served value of the start record (/v1/models after a -1 relaunch), not the engine config
+    line's pre-fit value. KV tokens add node1's engines (its facts, else its pulled log tail) for phases whose node1
+    engines log only there; without them kv_scope says "node0 only". A phase found in several packages (scr-A of
+    both FP8 jobs) is kept once per package: the first under its name, the others as <phase>@<source>."""
     launches = {}
-    for pkg in packages:
+    for number, pkg in enumerate(packages, start=1):
+        source = pkg.get("source") or f"package {number}"
         points = [p for p in pkg.get("points", []) if str(p.get("phase", "")).startswith("scr-")]
         groups = {}
         for (_, phase, _), point in best_attempts(points).items():
             groups.setdefault(phase, []).append(point)
         results = {p["phase"]: p for p in pkg.get("phases", []) if str(p.get("phase", "")).startswith("scr-")}
         for phase in dict.fromkeys([*results, *groups]):
+            key = phase if phase not in launches else f"{phase}@{source}"
             metrics, flags, lambdas = launch_metrics(groups.get(phase, []), protocol, phase_nodes(protocol, phase))
             effective, result = (pkg.get("effective") or {}).get(phase) or {}, results.get(phase) or {}
-            kv = effective.get("kv_tokens") or []
-            launches[phase] = {
+            start, two = (pkg.get("start") or {}).get(phase), peer_engines(protocol, phase)
+            node1 = (((pkg.get("peer") or {}).get(phase) or {}).get("kv_tokens")
+                     or kv_from_text((pkg.get("replica_tails") or {}).get(phase))) if two else []
+            kv = [*(effective.get("kv_tokens") or []), *node1]
+            launches[key] = {
+                "phase": phase, "source": source, "key": key,
                 "status": result.get("status"), "note": result.get("note"), "seconds": result.get("seconds"),
-                "start": (pkg.get("start") or {}).get(phase), "max_model_len": effective.get("max_model_len"),
-                "kv_tokens": kv, "kv_tokens_total": sum(kv) if kv else None, "problems": effective.get("problems"),
+                "start": start, "max_model_len": start.get("max_model_len") if start else effective.get("max_model_len"),
+                "kv_tokens": kv, "kv_tokens_total": sum(kv) if kv else None,
+                "kv_scope": ("node0 and node1" if node1 else "node0 only") if two else "all engines",
+                "problems": effective.get("problems"),
                 "screen": (pkg.get("screens") or {}).get(phase), "parity": (pkg.get("parity") or {}).get(phase),
                 "reference": pkg.get("screen_reference"), "metrics": metrics, "flags": flags, "lambda": lambdas,
                 "peaks": {p["id"]: point_peaks(p) for p in groups.get(phase, []) if p["valid"]},
                 "invalid_points": sorted({p["id"] for p in groups.get(phase, []) if not p["valid"]}),
                 "reclaim": (pkg.get("reclaim") or {}).get(phase),
+                "preflight": {k: v for k, v in ((pkg.get("preflight") or {}).get(phase) or {}).items()
+                              if k in ("choice", "reason")} or None,
                 "missing_part": phase in (pkg.get("missing_launches") or [])}
     return launches
+
+
+def same_job(launches, launch, phase):
+    """The launch of `phase` from the package (job) of `launch`; the first one under that name otherwise."""
+    for other in launches.values() if launch else ():
+        if other["phase"] == phase and other["source"] == launch["source"]:
+            return other
+    return launches.get(phase)
 
 
 def screen_parity_problems(parity, limits):
@@ -1082,19 +1117,22 @@ def select(packages, protocol=None):
     chosen = []
     for family in ("fp8", "nvfp4"):
         rule = rules[family]
-        reference = launches.get(rule["reference"])
         candidates = {}
         for phase in rule["phases"]:
-            problems = screen_eligibility(phase, launches.get(phase), reference, rule, protocol)
-            if reference is None or reference["status"] != "passed":
-                problems.insert(0, f"the reference {rule['reference']} did not pass")
-            launch, point = launches.get(phase) or {}, rule["rank_by"].rsplit(".", 1)[0]
-            candidates[phase] = {"layout": phase_entry(protocol, phase)["layout"], "eligible": not problems,
-                                 "value": launch.get("metrics", {}).get(rule["rank_by"]), "problems": problems,
-                                 "ranking_point": {"flags": (launch.get("flags") or {}).get(point, []),
-                                                   **(launch.get("peaks") or {}).get(point, {})}}
-        ranking = sorted((p for p, c in candidates.items() if c["eligible"]),
-                         key=lambda p: (-candidates[p]["value"], rule["phases"].index(p)))
+            for key in [k for k, launch in launches.items() if launch["phase"] == phase] or [phase]:
+                launch, point = launches.get(key), rule["rank_by"].rsplit(".", 1)[0]
+                reference = same_job(launches, launch, rule["reference"])
+                problems = screen_eligibility(phase, launch, reference, rule, protocol)
+                if reference is None or reference["status"] != "passed":
+                    problems.insert(0, f"the reference {rule['reference']} did not pass")
+                launch = launch or {}
+                candidates[key] = {"layout": phase_entry(protocol, phase)["layout"], "phase": phase,
+                                   "reference": (reference or {}).get("key"), "eligible": not problems,
+                                   "value": launch.get("metrics", {}).get(rule["rank_by"]), "problems": problems,
+                                   "ranking_point": {"flags": (launch.get("flags") or {}).get(point, []),
+                                                     **(launch.get("peaks") or {}).get(point, {})}}
+        ranking = sorted((k for k, c in candidates.items() if c["eligible"]),
+                         key=lambda k: (-candidates[k]["value"], rule["phases"].index(candidates[k]["phase"])))
         choice = candidates[ranking[0]]["layout"] if ranking else None
         out["families"][family] = {"reference": rule["reference"], "rank_by": rule["rank_by"], "ranking": ranking,
                                    "choice": choice, "candidates": candidates}
@@ -1102,15 +1140,16 @@ def select(packages, protocol=None):
             chosen.append(choice)
     dx = rules["dx2"]
     key = dx["metric"].split(".", 1)[1]
-    x, base = ((launches.get(p) or {}).get("lambda", {}).get(key) for p in (dx["x"], dx["base"]))
+    x, base = ((launch or {}).get("lambda", {}).get(key) for launch in
+               (launches.get(dx["x"]), same_job(launches, launches.get(dx["x"]), dx["base"])))
     decision = dx2_decision(x, base, dx["ratio_min"])
     out["dx2"] = {"decision": decision, "lambda_dx2": x, "lambda_dx1": base, "ratio_min": dx["ratio_min"],
                   "ratio": x["value"] / base["value"] if x and base and x.get("value") and base.get("value") else None,
                   "run_dx2_job": decision != "fail", "note": dx["unbracketed"]}
-    pd = launches.get("scr-PD")
-    out["pd"] = None if pd is None else {
-        "status": pd["status"], "note": pd["note"], "lambda_w1_standard": pd["lambda"].get("W1.standard"),
-        "parity": pd["parity"], "invalid_points": pd["invalid_points"], "selected": False, "rule": rules["pd"]}
+    out["pd"] = {key: {"status": pd["status"], "note": pd["note"], "source": pd["source"], "preflight": pd["preflight"],
+                       "lambda_w1_standard": pd["lambda"].get("W1.standard"), "parity": pd["parity"],
+                       "invalid_points": pd["invalid_points"], "selected": False, "rule": rules["pd"]}
+                 for key, pd in launches.items() if pd["phase"] == "scr-PD"} or None
     sensitivity = sensitivity_of(protocol, chosen[0]) if chosen and resolve_layout(protocol, chosen[0])["checkpoint"] == "fp8" else None
     keys = [rates_key(protocol, name) for name in ["A", *chosen]]
     out.update(round_layouts=",".join(chosen), sensitivity=sensitivity,
@@ -1118,15 +1157,22 @@ def select(packages, protocol=None):
                rates={"slo_rates_env": [f"SLO_RATES_{key}" for key in keys], "soak_rates_keys": keys,
                       "soak_rates": "SOAK_RATES=" + ",".join(f"{key}=<req/s>" for key in keys),
                       "note": "the round-3 soak looks these keys up (A2 and the sensitivity runs use their base layout's)"},
-               pairs=[{"name": pair["name"], "x": pair["x"], "base": pair["base"],
-                       "ratios": {m: launches[pair["x"]]["metrics"].get(m) / launches[pair["base"]]["metrics"][m]
-                                  for m in pair["metrics"] if pair["x"] in launches and pair["base"] in launches
-                                  and launches[pair["x"]]["metrics"].get(m) is not None
-                                  and launches[pair["base"]]["metrics"].get(m)},
-                       "note": "one launch each: an indication, not a statistically established difference"}
-                      for pair in protocol["screen"]["pairs"]],
+               pairs=[pair_ratios(launches, pair, key) for pair in protocol["screen"]["pairs"]
+                      for key in [k for k, launch in launches.items() if launch["phase"] == pair["x"]] or [pair["x"]]],
                launches=launches)
     return out
+
+
+def pair_ratios(launches, pair, key):
+    """x / base of a screening pair's metrics for the launch `key` of its x: the base of the same job when that job
+    has one, else the first one of another job (cross_job: PD's rerun against the earlier two-node job's D)."""
+    x = launches.get(key)
+    base = same_job(launches, x, pair["base"])
+    ratios = {m: x["metrics"][m] / base["metrics"][m] for m in pair["metrics"]
+              if x and base and x["metrics"].get(m) is not None and base["metrics"].get(m)}
+    return {"name": pair["name"], "x": key, "base": (base or {}).get("key", pair["base"]),
+            "cross_job": bool(x and base and x["source"] != base["source"]), "ratios": ratios,
+            "note": "one launch each: an indication, not a statistically established difference"}
 
 
 def selection_markdown(selection):
@@ -1144,7 +1190,8 @@ def selection_markdown(selection):
         kv = launch.get("kv_tokens") or []
         rows.append(f"| {phase} | {launch['status']} | {fmt(launch.get('max_model_len'))}"
                     f"{' (fallback)' if start.get('length_fallback') else ''} | "
-                    f"{(f'{min(kv):,}-{max(kv):,} ({len(kv)}, {sum(kv):,})' if kv else '-')} | {fmt(start.get('seconds_to_healthy'))} | "
+                    f"{(f'{min(kv):,}-{max(kv):,} ({len(kv)}, {sum(kv):,})' if kv else '-')}"
+                    f"{' node0 only' if launch.get('kv_scope') == 'node0 only' else ''} | {fmt(start.get('seconds_to_healthy'))} | "
                     f"{fmt(parity.get('mean_abs_logprob_diff'), 4)} / {fmt(parity.get('top1_agreement'), 4)} | "
                     f"{fmt(metrics.get('R/isl1024-c1.tpot_p50'), 1)} / {fmt(metrics.get('R/isl8192-c1.tpot_p50'), 1)} | "
                     f"{fmt(metrics.get('R/isl8192-c32.output_tok_s'), 1)} | {fmt(metrics.get('lambda_star.W1.standard'))} | "
@@ -1156,11 +1203,13 @@ def selection_markdown(selection):
                     f"peak running {fmt(c['ranking_point'].get('peak_running'))}]" if c["ranking_point"]["flags"] else "")
                  + ("" if c["eligible"] else " - " + "; ".join(c["problems"])) for phase, c in result["candidates"].items()]
     rows += ["", "## Indications (one launch each)", ""]
-    rows += [f"- {pair['name']}: " + (", ".join(f"{m} x{v:.3f}" for m, v in pair["ratios"].items()) or "-")
-             for pair in selection["pairs"]]
-    if selection.get("pd"):
-        rows += ["", f"PD (experimental, never selected): {selection['pd']['status']}"
-                 + (f" - {selection['pd']['note']}" if selection["pd"].get("note") else "")]
+    rows += [f"- {pair['name']} ({pair['x']} / {pair['base']}{', cross-job' if pair.get('cross_job') else ''}): "
+             + (", ".join(f"{m} x{v:.3f}" for m, v in pair["ratios"].items()) or "-") for pair in selection["pairs"]]
+    for key, pd in (selection.get("pd") or {}).items():
+        preflight = pd.get("preflight") or {}
+        rows += ["", f"PD (experimental, never selected) {key}: {pd['status']}"
+                 + (f"; NIXL preflight: {preflight.get('choice') or 'failed'}" if preflight else "")
+                 + (f" - {pd['note']}" if pd.get("note") else "")]
     return "\n".join(rows) + "\n"
 
 
@@ -1210,10 +1259,11 @@ def read_packages(paths):
     for path in paths:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if isinstance(data, list):
-            packages += data
+            packages += [{"source": f"{Path(path).stem}[{i}]", **pkg} for i, pkg in enumerate(data)]
             continue
+        source = data.get("job") or Path(path).stem
         data = data.get("reports", data)
-        packages.append(merge_package(data) or data)
+        packages.append({"source": source, **(merge_package(data) or data)})
     return packages
 
 

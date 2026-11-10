@@ -23,7 +23,8 @@ del sys.path[:3]
 ENTRY = (SRC / "entry.sh").read_text(encoding="utf-8")
 PROTOCOL_SH = (SRC / "bench" / "protocol.sh").read_text(encoding="utf-8")
 PROTOCOL = slo_suites.load_protocol()
-SCREEN_TEMPLATES = ("serving-screen-fp8-nd96.yml", "serving-screen-nvfp4-nd96.yml", "serving-screen-nvfp4-2node-nd96.yml")
+SCREEN_TEMPLATES = ("serving-screen-fp8-nd96.yml", "serving-screen-fp8-dp-nd96.yml", "serving-screen-nvfp4-nd96.yml",
+                    "serving-screen-nvfp4-2node-nd96.yml", "serving-screen-nvfp4-pd-nd96.yml")
 NEW_TEMPLATES = ("slo-round-nd96.yml", "serving-diag-nd96.yml", "slo-nvfp4-2replica-nd96.yml", "collect-slo-outputs.yml",
                  *SCREEN_TEMPLATES)
 POSIX_BASH = shutil.which("bash") and sys.platform != "win32"
@@ -43,6 +44,41 @@ def download_snippet(text):
     command = re.sub(r"\n\s+", " ", text.split("command: >-", 1)[1].split("\nlimits:", 1)[0])
     return re.search(r'python3 -c "(.*?)"\s+&& break', command).group(1)
 
+
+FAKE_VLLM = """#!/bin/bash
+python3 -c 'import json, sys; print(json.dumps(sys.argv[3:]))' "$@" >> FOLDER/vllm-calls
+echo "HOST=${VLLM_HOST_IP:-}" >> FOLDER/vllm-env
+[ -f FOLDER/node0-lives ] && sleep 2
+exit 0
+"""
+
+MP_STUBS = """
+BENCH_POLL_SECONDS=0; IB_MODE=ib
+bench_model() { echo FOLDER; }
+bench_replica() {
+  echo "$1" >> FOLDER/replica-actions
+  case "$1" in
+    start) printf '%s\\n' "$3" >> FOLDER/replica-args; printf '%s\\n' "$4" >> FOLDER/replica-env
+           echo "node0 launched before node1: ${SERVER_PID:+yes}" >> FOLDER/order
+           [ "$(grep -c '^start$' FOLDER/replica-actions)" -ge "$HEALTHY_AT" ] && touch FOLDER/healthy
+           echo 10.1.2.3 ;;
+    alive) [ ! -f FOLDER/node1-dead ] ;;
+    *) echo '{"returncode": 0}' ;;
+  esac
+}
+bench_url_ok() { echo "$1" >> FOLDER/urls; [ -f FOLDER/healthy ]; }
+bench_effective() { echo '{"problems": []}'; }
+bench_nccl() { echo '{"gate": {"passed": true}}'; }
+bench_clean() { echo "$2 $3" >> FOLDER/cleans; return 0; }
+timeout() { shift; "$@"; }
+python3() {
+  if [ "${1:-}" = "$BENCH/slo_suites.py" ] && [ "${2:-}" = run ]; then echo "$*" > FOLDER/client
+  elif [ "${1:-}" = "$BENCH/node_tools.py" ] && [ "${2:-}" = tail ]; then cat FOLDER/tail.txt
+  elif [ "${1:-}" = "$BENCH/node_tools.py" ] && [ "${2:-}" = facts ]; then echo '{"kv_tokens": [7, 8]}' > "$3"
+  elif [ "${1:-}" = "$BENCH/node_tools.py" ]; then :
+  else command python3 "$@"; fi
+}
+"""
 
 FAKE_MLFLOW = """import json, os
 
@@ -94,7 +130,8 @@ class EntryHookTests(unittest.TestCase):
         self.assertEqual(code, [])
         self.assertIsNone(re.search(r"^\s*(?:if !?\s*|elif !?\s*)?serve\s", PROTOCOL_SH, re.M),
                           "protocol phases must not use entry.sh's serve(), which retries eagerly")
-        self.assertIn('setsid vllm serve "$model" "${SPEC_ARGS[@]}"', PROTOCOL_SH)
+        self.assertIn('setsid vllm serve "$model" "${args[@]}"', PROTOCOL_SH)
+        self.assertIn('args=("${SPEC_ARGS[@]//@head_ip/${NODE_IP:-}}")', PROTOCOL_SH, "the protocol's flags, nothing else")
         self.assertIn('kill -INT -- "-$SERVER_PID"', PROTOCOL_SH)
         self.assertNotIn("export VLLM_SERVER_DEV_MODE", PROTOCOL_SH)
         self.assertIn('env "${SPEC_ENV[@]}"', PROTOCOL_SH)
@@ -190,8 +227,10 @@ class EntryHookTests(unittest.TestCase):
         self.assertIn("rc=1", other.stdout)
         self.assertEqual(len(slo_calls), 1, "rounds never relaunch: only the screening has the length fallback")
 
-    def pd_stubs(self, folder, smoke='{"ok": true, "reason": "ok"}', replica_ip="10.1.2.3"):
-        """protocol.sh's functions with the second server, the proxy, the smoke test and the client stubbed."""
+    def pd_stubs(self, folder, smoke='{"ok": true, "reason": "ok"}', replica_ip="10.1.2.3", preflight="default",
+                 descs="2 'Registering descs' lines, 244 descriptors, 1 of zero length"):
+        """protocol.sh's functions with the second server, the NIXL preflight, the proxy, the smoke test, node1's log
+        and the client stubbed."""
         return protocol_functions(folder, f"""
             bench_model() {{ echo {folder}; }}
             bench_replica() {{ echo "$*" >> {folder}/replica; [ "$1" = start ] && echo {replica_ip}; return 0; }}
@@ -203,6 +242,11 @@ class EntryHookTests(unittest.TestCase):
                          elif [ "${{1:-}}" = "$BENCH/lb_proxy.py" ]; then echo "$*" > {folder}/proxy; sleep 2;
                          elif [ "${{1:-}}" = "$BENCH/slo_suites.py" ] && [ "${{2:-}}" = run ]; then echo "$*" > {folder}/client;
                          elif [ "${{1:-}}" = "$BENCH/node_tools.py" ] && [ "${{2:-}}" = tail ]; then echo "NODE1 TAIL: NIXL error";
+                         elif [ "${{1:-}}" = "$BENCH/node_tools.py" ] && [ "${{2:-}}" = preflight ]; then
+                           echo '{{"choice": null}}' > "$3"; echo "{preflight}";
+                         elif [ "${{1:-}}" = "$BENCH/node_tools.py" ] && [ "${{2:-}}" = descs ]; then
+                           echo '{{"node0": [{{"kind": "registering", "descs": 122, "zero_length": 1}}]}}' > "$3"; echo "{descs}";
+                         elif [ "${{1:-}}" = "$BENCH/node_tools.py" ]; then :;
                          else command python3 "$@"; fi; }}
             wait_healthy() {{ echo 7 > {folder}/startup-$1.seconds; }}
         """)
@@ -269,6 +313,149 @@ class EntryHookTests(unittest.TestCase):
         self.assertIn("rc=1", dead.stdout, dead.stderr)
         self.assertIn("experimental phase: the second server could not be started on node1", dead_phase)
         self.assertIn("--- node1: vllm-scr-PD-replica1.log ---\nNODE1 TAIL: NIXL error", failure)
+
+    def run_mp(self, folder, phase, healthy_at=1, tail="", node1_dies=False):
+        """protocol_phase for an mp-multinode phase with node1's actor, node0's health and node1's log stubbed: node0
+        turns healthy once node1's engines have started `healthy_at` times."""
+        (folder / "bin").mkdir(exist_ok=True)
+        (folder / "bin" / "vllm").write_text(FAKE_VLLM.replace("FOLDER", str(folder)))
+        (folder / "bin" / "vllm").chmod(0o755)
+        (folder / "tail.txt").write_text(tail)
+        if node1_dies:
+            (folder / "node1-dead").touch()
+            (folder / "node0-lives").touch()
+        body = MP_STUBS.replace("FOLDER", str(folder)) + f"HEALTHY_AT={healthy_at}\n"
+        result = subprocess.run(["bash", "-c", protocol_functions(folder, body) + f'protocol_phase {phase}; echo "rc=$?"'],
+                                capture_output=True, text=True, timeout=180)
+        read = lambda name: (folder / name).read_text().splitlines() if (folder / name).exists() else []
+        return result, read
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_mp_multinode_starts_node0_then_node1_headless_and_waits_for_node0_only(self):
+        api_only = PROTOCOL["server"]["launchers"]["mp-multinode"]["api_only_flags"]
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            result, read = self.run_mp(folder, "scr-C4m")
+            node0, node1 = json.loads(read("vllm-calls")[0]), json.loads(read("replica-args")[0])
+            env1 = json.loads(read("replica-env")[0])
+            client, start = read("client")[0], json.loads((folder / "start-scr-C4m.json").read_text())
+            outputs = (read("order"), read("vllm-env"), read("urls"), read("replica-actions"), read("cleans"), read("phases"))
+            facts, proxy = json.loads((folder / "peer-scr-C4m.json").read_text()), (folder / "lb-scr-C4m.log").exists()
+        order, env0, urls, actions, cleans, phases = outputs
+        self.assertIn("rc=0", result.stdout, result.stderr)
+        self.assertEqual(order, ["node0 launched before node1: yes"])
+        self.assertEqual(node0[node0.index("--data-parallel-address") + 1], "127.0.0.1", "@head_ip is node0's address")
+        self.assertEqual(node0[node0.index("--api-server-count") + 1], "1")
+        self.assertFalse({"--headless", "--data-parallel-start-rank"} & set(node0))
+        self.assertEqual(node1[-3:], ["--headless", "--data-parallel-start-rank", "2"])
+        self.assertEqual(node1[:-3], slo_suites.without_flags(node0, api_only), "identical engine flags on both nodes")
+        self.assertEqual((env0, env1["VLLM_HOST_IP"], env1["VLLM_ENGINE_READY_TIMEOUT_S"]), (["HOST=127.0.0.1"], "@node_ip", "5"))
+        self.assertEqual(set(urls), {"http://127.0.0.1:8000/health"}, "node1 serves no API: only node0's health")
+        self.assertIn("--base http://127.0.0.1:8000 ", client)
+        self.assertFalse(proxy, "one endpoint, no load balancer")
+        self.assertEqual(actions, ["start", "stop"])
+        self.assertEqual(cleans, ["before 2", "after 2"], "both nodes are checked")
+        self.assertEqual(facts, {"kv_tokens": [7, 8]}, "node1's KV facts are recorded")
+        self.assertTrue(phases[0].startswith("scr-C4m passed"), phases)
+        self.assertEqual((start["started"], start["seconds_to_healthy"] is not None), (True, True))
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_a_kv_capacity_error_on_node1_relaunches_both_nodes_with_minus_1(self):
+        tail = ("--- node1 ---\n(EngineCore_DP9 pid=7) ValueError: To serve at least one request with the model's max seq len "
+                "(131072), (9.50 GiB KV cache is needed, which is larger than the available KV cache memory (2.28 GiB). Based "
+                "on the available memory, the estimated maximum model length is 31616. Try increasing ...")
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            result, read = self.run_mp(folder, "scr-C16m", healthy_at=2, tail=tail)
+            calls = [json.loads(line) for line in read("vllm-calls")]
+            peers = [json.loads(line) for line in read("replica-args")]
+            actions = [a for a in read("replica-actions") if a != "alive"]
+            start = json.loads((folder / "start-scr-C16m.json").read_text())
+            short, phases, cleans = (folder / "vllm-scr-C16m-short.log").exists(), read("phases"), read("cleans")
+        self.assertIn("rc=0", result.stdout, result.stderr)
+        length = lambda args: args[args.index("--max-model-len") + 1]
+        self.assertEqual([length(a) for a in calls], ["131072", "-1"], "node0 relaunched with -1")
+        self.assertEqual([length(a) for a in peers], ["131072", "-1"], "node1 relaunched with -1")
+        self.assertTrue(all(p[-3:] == ["--headless", "--data-parallel-start-rank", "8"] for p in peers))
+        self.assertEqual(actions, ["start", "stop", "start", "stop"], "node1 is stopped before the relaunch and at the end")
+        self.assertIn("retry 2", cleans)
+        self.assertTrue(short, "node0's first log is kept")
+        self.assertEqual(start["length_fallback"], {"requested": 131072, "estimated": 31616})
+        self.assertTrue(phases[0].startswith("scr-C16m passed relaunched with --max-model-len -1 (vLLM estimated 31616 tokens)"), phases)
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_node1_exiting_ends_the_wait_and_both_nodes_are_stopped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            result, read = self.run_mp(folder, "scr-C8m", healthy_at=99, node1_dies=True)
+            phases, actions, cleans = read("phases"), read("replica-actions"), read("cleans")
+            ran_client = (folder / "client").exists()
+        self.assertIn("rc=1", result.stdout, result.stderr)
+        self.assertEqual(phases, ["scr-C8m failed the headless DP engines on node1 exited before node0 became healthy"])
+        self.assertEqual((actions[0], actions[-1]), ("start", "stop"), "node1 is stopped although the start failed")
+        self.assertIn("alive", actions)
+        self.assertEqual(cleans[-1], "after 2")
+        self.assertFalse(ran_client)
+        body = PROTOCOL_SH[PROTOCOL_SH.index("protocol_phase() {"):]
+        self.assertNotIn('[ "$SPEC_REPLICAS" -gt 1 ] &&', body, "every peer action covers mp-multinode (bench_has_peer)")
+        self.assertIn('elif [ "$SPEC_PROXY" = lb ] && [ -n "$peer" ]; then', body, "no load balancer for headless engines")
+
+    def run_pd(self, folder, vllm, extra="", **stubs):
+        (folder / "bin").mkdir(exist_ok=True)
+        (folder / "bin" / "vllm").write_text("#!/bin/bash\n" + vllm.replace("FOLDER", str(folder)))
+        (folder / "bin" / "vllm").chmod(0o755)
+        result = subprocess.run(["bash", "-c", self.pd_stubs(folder, **stubs) + extra + 'IB_MODE=ib; protocol_phase scr-PD; echo "rc=$?"'],
+                                capture_output=True, text=True, timeout=120)
+        read = lambda name: (folder / name).read_text() if (folder / name).exists() else ""
+        return result, read
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_pd_takes_the_environment_its_nixl_preflight_passed_with(self):
+        for choice, expected in (("default", "unset"), ("UCX_MEMTYPE_CACHE=n", "n")):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as folder:
+                result, read = self.run_pd(Path(folder), 'echo "UCX_MEMTYPE_CACHE=${UCX_MEMTYPE_CACHE:-unset}" >> FOLDER/vllm-calls\n',
+                                           preflight=choice)
+                call, replica, phases, reports = read("vllm-calls"), read("replica"), read("phases"), read("reports")
+                self.assertIn("rc=0", result.stdout, result.stderr)
+                self.assertEqual(call.strip(), f"UCX_MEMTYPE_CACHE={expected}", "node0's server")
+                self.assertEqual('"UCX_MEMTYPE_CACHE": "n"' in replica.splitlines()[0], expected == "n", "node1's server")
+                self.assertIn("node0.scr-PD.preflight --file", reports)
+                self.assertTrue(phases.startswith("scr-PD passed NIXL preflight passed with"), phases)
+        self.assertNotIn("UCX_TLS", PROTOCOL_SH + json.dumps(PROTOCOL["layouts"]["PD"].get("env")), "UCX_TLS would drop InfiniBand")
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_pd_does_not_start_when_no_preflight_variant_passes(self):
+        reason = "node1 default: VRAM registration failed (alloc-after-first-registration): NIXL_ERR_BACKEND"
+        with tempfile.TemporaryDirectory() as folder:
+            result, read = self.run_pd(Path(folder), "echo started >> FOLDER/vllm-calls\n", preflight=f"none: {reason}")
+            phases, replica, started = read("phases"), read("replica"), read("vllm-calls")
+            client, start = read("client"), json.loads(read("start-scr-PD.json"))
+        self.assertIn("rc=1", result.stdout, result.stderr)
+        self.assertEqual(phases.strip(), f"scr-PD failed experimental phase: PD not possible here: NIXL preflight failed ({reason})")
+        self.assertEqual((started, client), ("", ""), "no server and no suite")
+        self.assertEqual(replica.splitlines(), ["stop"], "the stop path still covers node1")
+        self.assertFalse(start["started"])
+
+    @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
+    def test_vram_typed_as_host_after_a_passed_preflight_gets_one_debug_relaunch(self):
+        vllm = ('echo "LOG=${VLLM_LOGGING_LEVEL:-INFO}" >> FOLDER/vllm-calls\n'
+                'echo "ERROR register_kv_caches: nixlBackendError: NIXL_ERR_BACKEND (VRAM memory is detected as host by UCX)"\n'
+                "exit 1\n")
+        with tempfile.TemporaryDirectory() as folder:
+            result, read = self.run_pd(Path(folder), vllm, extra="wait_healthy() { sleep 1; return 1; }\n")
+            calls, replica, phases, reports = read("vllm-calls"), read("replica"), read("phases"), read("reports")
+            kept, client = (Path(folder) / "vllm-scr-PD-vram.log").exists(), read("client")
+        starts = [line for line in replica.splitlines() if line.startswith("start")]
+        self.assertIn("rc=1", result.stdout, result.stderr)
+        self.assertEqual(calls.split(), ["LOG=INFO", "LOG=DEBUG"], "one debug relaunch of node0's server")
+        self.assertEqual(['"VLLM_LOGGING_LEVEL": "DEBUG"' in line for line in starts], [False, True], "and of node1's")
+        self.assertTrue(kept, "the first log is kept")
+        self.assertEqual(phases.strip(), "scr-PD failed experimental phase: UCX typed the KV cache's VRAM as host memory "
+                         "although the NIXL preflight passed (default); the debug relaunch failed again; 2 'Registering "
+                         "descs' lines, 244 descriptors, 1 of zero length (no suites) [NIXL preflight passed with the defaults]")
+        failure = reports[reports.index("node0.scr-PD.failure --text "):]
+        self.assertTrue(failure.startswith('node0.scr-PD.failure --text {"node0": [{"kind": "registering"'), failure[:200])
+        self.assertEqual(client, "", "no suites")
 
     @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
     def test_a_dirty_node_is_reclaimed_once_and_the_event_recorded(self):
@@ -404,6 +591,12 @@ class TemplateTests(unittest.TestCase):
                     self.assertEqual(spec["suites"], ["screen"], phase)
                 screened.update(plan)
         self.assertEqual(env_value(template("serving-screen-fp8-nd96.yml"), "RUN_KERNEL_TESTS"), "1")
+        self.assertEqual(env_value(template("serving-screen-fp8-dp-nd96.yml"), "RUN_KERNEL_TESTS"), "0", "ran in the FP8 job")
+        self.assertEqual(PROTOCOL["screen"]["jobs"]["fp8_dp"]["plan"][0], "scr-A", "A: the same-job reference")
+        pd = template("serving-screen-nvfp4-pd-nd96.yml")
+        self.assertEqual((env_value(pd, "PHASE_PLAN"), env_value(pd, "RUN_KERNEL_TESTS"), env_value(pd, "IB_PROBE")),
+                         ("scr-Dref scr-PD", "0", "1"))
+        self.assertEqual(re.search(r"timeout: (\d+)", pd).group(1), "10800")
         self.assertEqual(screened, {p for p in PROTOCOL["phases"] if p.startswith("scr-")})
         self.assertEqual(env_value(template("slo-round-nd96.yml"), "ROUND_LAYOUTS"), ",".join(PROTOCOL["rounds"]["layouts"]))
         self.assertIn("FALLBACK ONLY", template("collect-slo-outputs.yml"))

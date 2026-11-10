@@ -126,6 +126,99 @@ def fake_proc(folder, processes, listeners=()):
     return proc
 
 
+class FactsTests(unittest.TestCase):
+    def test_facts_read_node1s_engines_of_the_latest_start(self):
+        ray = FakeRay(["10.0.0.1", "10.0.0.2"])
+        log = ("=== axk2 replica start scr-C16m-replica1 ===\n"
+               "(EngineCore_DP8 pid=1) ERROR ValueError: ... larger than the available KV cache memory ...\n"
+               "=== axk2 replica start scr-C16m-replica1 ===\n"
+               "(EngineCore_DP8 pid=2) INFO 11-10 [parallel_state.py:1] rank 8 in world size 16 is assigned as DP rank 8, PP rank 0\n"
+               "(EngineCore_DP8 pid=2) INFO 11-10 [kv_cache_utils.py:1] GPU KV cache size: 31,232 tokens\n"
+               "(EngineCore_DP9 pid=3) INFO 11-10 [kv_cache_utils.py:1] GPU KV cache size: 31,360 tokens\n"
+               "(EngineCore_DP9 pid=3) INFO 11-10 [scheduler.py:1] unrelated line\n")
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(sys.modules, ray.modules):
+            outputs = outputs_tree(folder)
+            (outputs / "node1" / "vllm-scr-C16m-replica1.log").write_text(log)
+            (outputs / "node0" / "vllm-scr-C16m-replica1.log").write_text("GPU KV cache size: 9 tokens\n")
+            out = Path(folder, "peer.json")
+            with redirect_stdout(StringIO()) as shown:
+                node_tools.main(["facts", str(out), str(outputs), "10.0.0.1", "vllm-scr-C16m-replica1.log"])
+            facts = json.loads(out.read_text())
+        self.assertEqual(facts["kv_tokens"], [31232, 31360], "node1's engines of the relaunch only; node0 is skipped")
+        self.assertEqual(facts["nodes"]["node1"]["lines"][0],
+                         "rank 8 in world size 16 is assigned as DP rank 8, PP rank 0")
+        self.assertEqual(len(facts["nodes"]["node1"]["lines"]), 3)
+        self.assertEqual(shown.getvalue().strip(), "2 engines on the other nodes, 62,592 KV tokens")
+        self.assertEqual(ray.pinned[0], {"node:10.0.0.2": 0.001})
+
+
+class PreflightChoiceTests(unittest.TestCase):
+    PASS, FAIL = {"ok": True}, {"ok": False, "reason": "VRAM registration failed"}
+
+    def choose(self, node0, node1, nodes=("10.0.0.1", "10.0.0.2")):
+        ray = FakeRay(list(nodes))
+        results = iter([node0, node1])
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(sys.modules, ray.modules), \
+                mock.patch.object(node_tools, "run_preflight", side_effect=lambda *a: next(results)):
+            out = Path(folder, "preflight.json")
+            with redirect_stdout(StringIO()) as shown:
+                node_tools.main(["preflight", str(out), "10.0.0.1", "nixl_preflight.py"])
+            return json.loads(out.read_text()), shown.getvalue().strip(), ray.pinned
+
+    def test_the_first_variant_that_passes_on_both_nodes_is_chosen(self):
+        both = {"default": self.PASS, "UCX_MEMTYPE_CACHE=n": self.PASS}
+        cache_off = {"default": self.FAIL, "UCX_MEMTYPE_CACHE=n": self.PASS}
+        self.assertEqual(self.choose(both, both)[1], "default")
+        result, shown, pinned = self.choose(both, cache_off)
+        self.assertEqual((result["choice"], shown), ("UCX_MEMTYPE_CACHE=n", "UCX_MEMTYPE_CACHE=n"))
+        self.assertEqual(pinned, [{"node:10.0.0.2": 0.001}], "node1's run is a Ray task pinned to node1")
+        none = {"default": self.FAIL, "UCX_MEMTYPE_CACHE=n": self.FAIL}
+        result, shown, _ = self.choose(both, none)
+        self.assertIsNone(result["choice"])
+        self.assertEqual(shown, "none: node1 default: VRAM registration failed; node1 UCX_MEMTYPE_CACHE=n: VRAM registration failed")
+        result, shown, _ = self.choose(both, both, nodes=("10.0.0.1",))
+        self.assertEqual(shown, "none: node1 not reached: no other node", "PD needs node1")
+
+    def test_one_run_per_variant_with_its_environment_and_a_time_limit(self):
+        script = ("import json, os, sys, time\n"
+                  "print('[1612345678.1] UCX  WARN  noise first')\n"
+                  "if os.environ.get('UCX_MEMTYPE_CACHE') == 'slow': time.sleep(30)\n"
+                  "print(json.dumps({'ok': os.environ.get('UCX_MEMTYPE_CACHE') == 'n', 'cvd': os.environ['CUDA_VISIBLE_DEVICES']}))\n")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "preflight.py")
+            path.write_text(script)
+            runs = node_tools.run_preflight(str(path), (("default", {}), ("off", {"UCX_MEMTYPE_CACHE": "n"}),
+                                                        ("slow", {"UCX_MEMTYPE_CACHE": "slow"})), timeout=2)
+        self.assertEqual(runs["default"], {"ok": False, "cvd": "0"}, "the last line, GPU 0 visible")
+        self.assertEqual(runs["off"], {"ok": True, "cvd": "0"})
+        self.assertEqual(runs["slow"], {"ok": False, "reason": "no answer within 2 s"})
+
+
+class DescsTests(unittest.TestCase):
+    def test_registering_lines_count_zero_length_descriptors_of_the_latest_start(self):
+        log = ("=== axk2 replica start scr-PD-replica1 ===\n"
+               "(Worker_TP0 pid=1) DEBUG [worker.py:961] Registering descs: [(1, 0, 0, '')]\n"
+               "=== axk2 replica start scr-PD-replica1 ===\n"
+               "(Worker_TP0 pid=2) DEBUG [worker.py:961] Registering descs: [(140000000000, 1048576, 0, ''), "
+               "(140000100000, 0, 0, ''), (140000200000, 1048576, 0, '')]\n"
+               "(Worker_TP0 pid=2) ERROR [worker.py:962] nixlBackendError: VRAM memory is detected as host by UCX\n")
+        ray = FakeRay(["10.0.0.1", "10.0.0.2"])
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(sys.modules, ray.modules):
+            outputs = outputs_tree(folder)
+            (outputs / "node0" / "vllm-scr-PD.log").write_text(
+                "(Worker_TP0 pid=3) DEBUG [worker.py:961] Registering descs: [(150000000000, 2097152, 0, '')]\n")
+            (outputs / "node1" / "vllm-scr-PD-replica1.log").write_text(log)
+            out = Path(folder, "descs.json")
+            with redirect_stdout(StringIO()) as shown:
+                node_tools.main(["descs", str(out), str(outputs), "10.0.0.1", "scr-PD"])
+            result = json.loads(out.read_text())
+        self.assertEqual([(l["kind"], l["descs"], l["zero_length"]) for l in result["node1"]],
+                         [("registering", 3, 1), ("host", 0, 0)], "the first start's line is gone")
+        self.assertEqual([(l["kind"], l["descs"], l["zero_length"]) for l in result["node0"]], [("registering", 1, 0)])
+        self.assertTrue(result["node1"][0]["text"].startswith("Registering descs: [(140000000000, 1048576, 0, '')"))
+        self.assertEqual(shown.getvalue().strip(), "2 'Registering descs' lines, 4 descriptors, 1 of zero length")
+
+
 class ReclaimTests(unittest.TestCase):
     @unittest.skipUnless(LINUX, "needs symlinks")
     def test_only_serving_processes_in_the_containers_own_view_are_killed(self):

@@ -432,6 +432,45 @@ class RoundLayoutTests(unittest.TestCase):
                                        soak_rates={key: 0.9, "E": 0.3, "C1": 0.4}))
                 self.assertEqual(ran[0][0]["rate"], 0.9, "the round-3 soak finds the candidate's own key")
 
+    def test_mp_multinode_runs_node1_headless_with_node0s_engine_flags(self):
+        launcher = PROTOCOL["server"]["launchers"]["mp-multinode"]
+        value = lambda args, flag: args[args.index(flag) + 1]
+        parallel = {flag: 1 for flag in ("--tensor-parallel-size", "--data-parallel-size", "--data-parallel-size-local",
+                                         "--data-parallel-backend", "--distributed-executor-backend", "--data-parallel-address",
+                                         "--data-parallel-rpc-port", "--max-num-batched-tokens")}
+        c2 = ss.phase_spec(PROTOCOL, "scr-C2", 0)
+        for phase, tp, dp, local, batched in (("scr-C4m", 4, 4, 2, 4096), ("scr-C8m", 2, 8, 4, 2048), ("scr-C16m", 1, 16, 8, 1024)):
+            with self.subTest(phase=phase):
+                spec = ss.phase_spec(PROTOCOL, phase, 0)
+                node0, node1 = spec["args"], spec["peer_args"]
+                self.assertEqual((spec["label"], spec["layout"], spec["launcher"], spec["nodes"], spec["replicas"], spec["proxy"]),
+                                 (phase[4:-1], phase[4:], "mp-multinode", 2, 1, ""))
+                for flag, expected in (("--tensor-parallel-size", tp), ("--data-parallel-size", dp),
+                                       ("--data-parallel-size-local", local), ("--max-num-batched-tokens", batched),
+                                       ("--data-parallel-backend", "mp"), ("--distributed-executor-backend", "mp"),
+                                       ("--data-parallel-address", "@head_ip"), ("--data-parallel-rpc-port", 13345),
+                                       ("--max-model-len", 131072), ("--api-server-count", 1), ("--max-num-seqs", 128)):
+                    self.assertEqual(value(node0, flag), str(expected), flag)
+                self.assertFalse({"--headless", "--data-parallel-start-rank"} & set(node0), "node0 is not hybrid LB")
+                self.assertEqual(node1[-3:], ["--headless", "--data-parallel-start-rank", str(local)])
+                self.assertEqual(node1[:-3], ss.without_flags(node0, launcher["api_only_flags"]), "identical engine flags")
+                self.assertFalse(set(launcher["api_only_flags"]) & set(node1), "no API-server flag on node1")
+                self.assertEqual(value(node1, "--reasoning-parser"), "deepseek_v3", "an engine argument in vLLM 0.23")
+                self.assertEqual(spec["node_env"], ["VLLM_HOST_IP"])
+                self.assertNotIn("VLLM_RAY_DP_PACK_STRATEGY", spec["env"])
+                self.assertEqual(ss.without_flags(node0, parallel), ss.without_flags(c2["args"], parallel),
+                                 "C2's common and engine flags apart from the parallel layout and the batch size")
+                self.assertIn("SPEC_LAUNCHER=mp-multinode", ss.shell_spec(spec))
+        self.assertEqual(ss.phase_spec(PROTOCOL, "scr-C2", 0)["peer_args"], [], "the Ray layouts keep one server")
+        sensitivity = ss.phase_spec(PROTOCOL, "slo-C4ms", 1)
+        self.assertEqual((sensitivity["launcher"], sensitivity["max_num_seqs"], sensitivity["max_num_batched_tokens"],
+                          sensitivity["rates_key"]), ("mp-multinode", 32, 2048, "C4m"))
+        self.assertEqual(ss.phase_spec(PROTOCOL, "cap-C16m", 1)["peer_args"][:6],
+                         ["--reasoning-parser", "deepseek_v3", "--max-model-len", "-1", "--gpu-memory-utilization", "0.9"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 1, "C8m,D"),
+                         ["slo-A", "slo-C8m", "slo-D", "slo-C8ms", "slo-A2", "cap-A", "cap-C8m", "cap-D"])
+        self.assertEqual(ss.without_flags(["--a", "1", "--b", "--c", "2"], {"--a": 1, "--b": 0}), ["--c", "2"])
+
     def test_plan_command_records_the_round(self):
         with tempfile.TemporaryDirectory() as folder:
             record = Path(folder, "plan.json")
@@ -462,6 +501,23 @@ class ScreenSuiteTests(unittest.TestCase):
         self.assertEqual(sorted(w1), PROTOCOL["workloads"]["W1"]["rates"])
         self.assertEqual(sorted(dx2), PROTOCOL["rate_sets"]["dx2"]["W1"])
         self.assertEqual([p["index"] for p in ss.screen_points(PROTOCOL, 0, "W1")[6:]], ss.rate_order(0, 3, 4))
+
+    def test_a_light_reference_runs_facts_and_parity_only(self):
+        spec = ss.phase_spec(PROTOCOL, "scr-Dref", 0)
+        self.assertEqual((spec["label"], spec["layout"], spec["nodes"], spec["replicas"], spec["suites"]),
+                         ("Dref", "D", 1, 1, ["screen"]))
+        self.assertEqual(spec["options"]["screen"]["steps"], ["facts", "parity"])
+        with mock.patch.object(ss, "screen_facts", return_value={"max_model_len": 131072}), \
+                mock.patch.object(ss, "screen_parity", return_value={"documents": 4}), \
+                mock.patch.object(ss, "suite_warmup") as warmup, mock.patch.object(ss, "run_points") as points, \
+                mock.patch.object(ss.vs, "server_healthy", return_value=True):
+            result = ss.suite_screen(args(round=0, tag="scr-Dref", phase="scr-Dref", layout="Dref", options=spec["options"]))
+        warmup.assert_not_called()
+        points.assert_not_called()
+        self.assertEqual({k: v["ok"] for k, v in result["steps"].items()}, {"facts": True, "parity": True})
+        self.assertEqual((result["plan"], result["points"]), ([], []))
+        self.assertNotIn("aborted", result, "no points planned, none missing")
+        self.assertEqual(PROTOCOL["screen"]["references"][-1], "scr-Dref", "the PD rerun job's parity reference")
 
     def test_screen_suite_records_failed_steps_and_still_measures(self):
         metrics = ('vllm:cache_config_info{block_size="64",engine="0",num_gpu_blocks="3300"} 1.0\n'

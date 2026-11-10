@@ -566,6 +566,17 @@ class ReportingTests(unittest.TestCase):
                 bs.subprocess, "run", side_effect=bs.subprocess.TimeoutExpired("report.py", 300)):
             self.assertFalse(any(v["sent"] for v in bs.report_package(data, str(Path(folder, "s.json"))).values()))
 
+    def test_package_keeps_node1_facts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "node0" / "verify").mkdir(parents=True)
+            (Path(folder) / "node0" / "peer-scr-C4m.json").write_text(json.dumps({"kv_tokens": [216000, 216000], "nodes": {}}))
+            (Path(folder) / "node0" / "preflight-scr-PD.json").write_text(json.dumps({"choice": None, "reason": "x"}))
+            (Path(folder) / "node0" / "descs-scr-PD.json").write_text(json.dumps({"summary": "1 'Registering descs' lines"}))
+            data = bs.package(folder, PROTOCOL)
+        self.assertEqual(data["peer"], {"scr-C4m": {"kv_tokens": [216000, 216000], "nodes": {}}})
+        self.assertEqual((data["preflight"]["scr-PD"]["reason"], data["descs"]["scr-PD"]["summary"]),
+                         ("x", "1 'Registering descs' lines"))
+
     def test_package_command_prints_the_key_sizes(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "node0" / "verify").mkdir(parents=True)
@@ -645,12 +656,88 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(selection["rates"]["soak_rates"], "SOAK_RATES=A=<req/s>,C4=<req/s>,D=<req/s>")
         self.assertEqual(selection["dx2"]["decision"], "pass")
         self.assertAlmostEqual(selection["dx2"]["ratio"], 2.0)
-        self.assertEqual((selection["pd"]["status"], selection["pd"]["selected"]), ("failed", False))
+        self.assertEqual((selection["pd"]["scr-PD"]["status"], selection["pd"]["scr-PD"]["selected"]), ("failed", False))
         pairs = {p["name"]: p["ratios"] for p in selection["pairs"]}
         self.assertAlmostEqual(pairs["D x 2 against D"]["lambda_star.W1.standard"], 2.0)
         markdown = bs.selection_markdown(selection)
         self.assertIn("C4,D", markdown)
         self.assertIn("scr-D: eligible, 340 [kv-bound; peak KV 0.990, peak running 26]", markdown)
+
+    def test_both_fp8_jobs_report_every_launch_against_their_own_reference(self):
+        fp8, nvfp4, two = self.packages()
+        fp8["phases"] = [dict(p, status="failed", note="the server never became healthy") if p["phase"] == "scr-C4" else p
+                         for p in fp8["phases"]]
+        dp = screening_job({"scr-A": (40, 42, 380), "scr-C4m": (52, 55, 650), "scr-C8m": (58, 60, 680), "scr-C16m": (45, 45, 720)},
+                           parity={p: self.GOOD for p in ("scr-C4m", "scr-C8m", "scr-C16m")},
+                           start={"scr-C16m": {"max_model_len": 60000, "length_fallback": {"requested": 131072, "estimated": 60000}}})
+        fp8["source"], dp["source"] = "screen-fp8", "screen-fp8-dp"
+        selection = bs.select([fp8, dp, nvfp4, two], PROTOCOL)
+        launches, family = selection["launches"], selection["families"]["fp8"]
+        self.assertEqual((launches["scr-C4"]["status"], launches["scr-C4m"]["status"]), ("failed", "passed"), "both reported")
+        self.assertEqual((launches["scr-A"]["source"], launches["scr-A@screen-fp8-dp"]["source"]), ("screen-fp8", "screen-fp8-dp"))
+        c4m = family["candidates"]["scr-C4m"]
+        self.assertEqual(c4m["reference"], "scr-A@screen-fp8-dp", "the TPOT reference is the A of the same job")
+        self.assertTrue(c4m["eligible"], "52/40 ms: 1.3 x its own A (it would be 1.73 x the other job's)")
+        self.assertIn("phase failed", " ".join(family["candidates"]["scr-C4"]["problems"]))
+        self.assertIn("could not hold --max-model-len 131072", " ".join(family["candidates"]["scr-C16m"]["problems"]))
+        self.assertEqual(family["ranking"], ["scr-C8m", "scr-C4m", "scr-A4", "scr-C2"])
+        self.assertEqual((family["choice"], selection["round_layouts"], selection["sensitivity"]), ("C8m", "C8m,D", "C8ms"))
+        self.assertEqual(selection["rates"]["slo_rates_env"], ["SLO_RATES_A", "SLO_RATES_C8m", "SLO_RATES_D"])
+        markdown = bs.selection_markdown(selection)
+        for row in ("| scr-C4 | failed |", "| scr-C4m | passed |", "| scr-A@screen-fp8-dp | passed |"):
+            self.assertIn(row, markdown)
+        self.assertEqual(sorted(k for k in family["candidates"] if k.startswith("scr-C4")), ["scr-C4", "scr-C4m"])
+
+    def test_max_model_len_is_the_served_value(self):
+        nvfp4 = screening_job({"scr-D": (25, 27, 340), "scr-D8": (20, 20, 500)},
+                              start={"scr-D": {"max_model_len": 131072},
+                                     "scr-D8": {"max_model_len": 31616, "length_fallback": {"requested": 131072, "estimated": 31616}}})
+        nvfp4["effective"] = {"scr-D": {"max_model_len": 131072}, "scr-D8": {"max_model_len": 262144, "kv_tokens": [32896] * 8}}
+        fp8 = screening_job({"scr-A": (30, 32, 400), "scr-A-auto": (31, 33, 410)}, start={"scr-A-auto": {"max_model_len": 262144}})
+        fp8["effective"] = {"scr-A-auto": {"max_model_len": 262144}, "scr-A": {"max_model_len": 131072}}
+        launches = bs.screen_launches([fp8, nvfp4], PROTOCOL)
+        self.assertEqual(launches["scr-D8"]["max_model_len"], 31616, "-1 served 31,616, not the config line's 262,144")
+        self.assertEqual(launches["scr-A-auto"]["max_model_len"], 262144, "A-auto does serve 262,144")
+        self.assertEqual(launches["scr-A"]["max_model_len"], 131072, "no start record: the engine config value")
+        self.assertIn("| scr-D8 | passed | 31616 (fallback) |", bs.selection_markdown(bs.select([fp8, nvfp4], PROTOCOL)))
+
+    def test_node1_engines_count_in_the_kv_totals(self):
+        two = screening_job({"scr-Dx1": (25, 27, 340), "scr-Dx2": (25, 27, 680), "scr-PD": (25, 27, 300)})
+        two["effective"] = {"scr-Dx1": {"kv_tokens": [253120]}, "scr-Dx2": {"kv_tokens": [253120]}, "scr-PD": {"kv_tokens": [250000]}}
+        two["peer"] = {"scr-Dx2": {"kv_tokens": [253120]}}
+        two["replica_tails"] = {"scr-PD": "GPU KV cache size: 1 tokens\n=== axk2 replica start scr-PD-replica1 ===\n"
+                                          "(EngineCore pid=1) INFO [kv_cache_utils.py:1] GPU KV cache size: 249,984 tokens\n"}
+        dp = screening_job({"scr-A": (30, 32, 400), "scr-C8m": (40, 42, 680)})
+        dp["effective"] = {"scr-A": {"kv_tokens": [600000, 600000]}, "scr-C8m": {"kv_tokens": [172000] * 4}}
+        launches = bs.screen_launches([two, dp], PROTOCOL)
+        scopes = {p: (launches[p]["kv_tokens_total"], launches[p]["kv_scope"]) for p in ("scr-Dx1", "scr-Dx2", "scr-PD", "scr-A", "scr-C8m")}
+        self.assertEqual(scopes, {"scr-Dx1": (253120, "all engines"), "scr-Dx2": (506240, "node0 and node1"),
+                                  "scr-PD": (499984, "node0 and node1"), "scr-A": (1200000, "all engines"),
+                                  "scr-C8m": (688000, "node0 only")})
+        self.assertEqual(bs.kv_from_text(two["replica_tails"]["scr-PD"]), [249984], "only the latest start counts")
+        rows = [r for r in bs.selection_markdown(bs.select([two, dp], PROTOCOL)).splitlines() if r.startswith("| scr-C8m |")]
+        self.assertIn("172,000-172,000 (4, 688,000) node0 only |", rows[0])
+
+    def test_the_pd_rerun_is_reported_with_cross_job_comparisons(self):
+        fp8, nvfp4, two = self.packages()
+        two["source"] = "screen-nvfp4-2node"
+        rerun = {"rounds": [0], "plans": {}, "parity": {"scr-PD": self.GOOD}, "start": {}, "source": "screen-nvfp4-pd",
+                 "preflight": {"scr-PD": {"choice": "UCX_MEMTYPE_CACHE=n", "node0": {}, "node1": {}}},
+                 "phases": [{"phase": "scr-Dref", "status": "passed"}, {"phase": "scr-PD", "status": "passed"}],
+                 "points": open_points(0, "scr-PD", [0.5, 1.2, 2.0, 3.0], [1.0, 0.95, 0.5, 0.2], [1, 2, 3, 4])}
+        selection = bs.select([fp8, nvfp4, two, rerun], PROTOCOL)
+        self.assertEqual({k: (v["status"], v["source"]) for k, v in selection["pd"].items()},
+                         {"scr-PD": ("failed", "screen-nvfp4-2node"), "scr-PD@screen-nvfp4-pd": ("passed", "screen-nvfp4-pd")})
+        self.assertEqual(selection["pd"]["scr-PD@screen-nvfp4-pd"]["preflight"], {"choice": "UCX_MEMTYPE_CACHE=n"})
+        pairs = {(p["name"], p["x"]): p for p in selection["pairs"] if p["name"].startswith("PD against")}
+        rerun_vs_d = pairs[("PD against D", "scr-PD@screen-nvfp4-pd")]
+        self.assertEqual((rerun_vs_d["base"], rerun_vs_d["cross_job"]), ("scr-Dx1", True))
+        self.assertAlmostEqual(rerun_vs_d["ratios"]["lambda_star.W1.standard"], 2.0, msg="the rerun's own ladder")
+        self.assertEqual(pairs[("PD against D x 2", "scr-PD@screen-nvfp4-pd")]["base"], "scr-Dx2")
+        self.assertFalse(pairs[("PD against D", "scr-PD")]["cross_job"], "the first PD's own job had Dx1")
+        markdown = bs.selection_markdown(selection)
+        self.assertIn("PD against D (scr-PD@screen-nvfp4-pd / scr-Dx1, cross-job)", markdown)
+        self.assertIn("PD (experimental, never selected) scr-PD@screen-nvfp4-pd: passed; NIXL preflight: UCX_MEMTYPE_CACHE=n", markdown)
 
     def test_a_failed_reference_selects_nothing_in_its_family(self):
         packages = self.packages()

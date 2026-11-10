@@ -1,6 +1,6 @@
 # A.X K2 서빙 재측정 프로토콜 (A100)
 
-- 상태: **구현 완료, GPU 실행 전.** 하네스·작업 템플릿·분석 스크립트를 구현했다. 확인은 합성 데이터 단위 테스트와 셸 구문 검사로만 했다. GPU와 Azure에서는 실행하지 않았다.
+- 상태: **구현 완료, GPU 실행 전**(라운드, mp-multinode 실행, PD 재실행 기준). 하네스·작업 템플릿·분석 스크립트를 구현했다. 스크리닝 작업 3개는 main 5dc653b로 GPU에서 실행했다. 그 결과로 추가한 mp-multinode 실행(6.8절), PD 재실행(6.5절)과 그 밖의 변경은 합성 데이터 단위 테스트와 셸 구문 검사로만 확인했다. 라운드는 아직 실행하지 않았다.
 - 근거: [검토 결과](report/REVIEW_2026-11-09.md) 8절의 계획을 구현했다. 이 문서와 그 계획이 다르면 이 문서가 구현된 내용이다. 다른 점은 17.1절에 모았다.
 - 단일 원천: 측정 조건은 모두 [`aml/src/bench/slo_protocol.json`](../aml/src/bench/slo_protocol.json)에 있다. 하네스는 이 파일만 읽는다. 이 문서의 수치는 이 파일의 값을 옮긴 것이다.
 - 사전 등록: 스크리닝(6절)으로 라운드 후보를 고른 뒤, 1라운드 전에 `aml/src/bench/` 전체, 이 문서, 고른 `ROUND_LAYOUTS` 값을 하나의 커밋으로 고정한다. 고정한 뒤 SLO, 도착률 격자, 시드, 판정 규칙을 바꾸면 새 커밋으로 다시 등록하고 그 사실을 공개한다. 무효 실행과 중단된 실행도 모두 공개한다.
@@ -92,14 +92,16 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 | 작업 템플릿 | 노드 | `PHASE_PLAN` | 예상 시간 (추정) | 제한 시간 |
 |---|---|---|---|---|
 | `serving-screen-fp8-nd96.yml` | 2 | `scr-A` `scr-A-auto` `scr-C1` `scr-C1rr` `scr-B0` `scr-C2` `scr-C4` `scr-C8` `scr-A4` `scr-C16` `scr-B0dcp` | 약 7시간 | 12시간 |
+| `serving-screen-fp8-dp-nd96.yml` | 2 | `scr-A` `scr-C4m` `scr-C8m` `scr-C16m` | 약 3.2시간 | 6시간 |
 | `serving-screen-nvfp4-nd96.yml` | 1 | `scr-D` `scr-E` `scr-Err` `scr-D24` `scr-D42` `scr-D8` | 약 4.5시간 | 8시간 |
 | `serving-screen-nvfp4-2node-nd96.yml` | 2 | `scr-Dx1` `scr-Dx2` `scr-PD` | 약 4시간 | 7시간 |
+| `serving-screen-nvfp4-pd-nd96.yml` | 2 | `scr-Dref` `scr-PD` | 약 2시간 | 3시간 |
 
-- 예상 시간은 10-21 측정의 기동 시간(구성당 4~8분)과 Part R 시간(약 20분)으로 추정했다. 구성 하나는 35~45분, 도착률 격자를 실행하는 2노드 NVFP4 구성은 60~70분이 걸린다고 본다. `-1`로 다시 띄울 것으로 예상하는 C16과 D8은 45~50분, 기동 실패를 예상하는 B0dcp는 약 10분으로 잡았다.
-- 세 작업 모두 `ROUND=0`이다. 시드가 라운드의 시드와 겹치지 않고, 같은 지점은 모든 구성에서 같은 프롬프트를 받는다.
-- FP8 작업은 `RUN_KERNEL_TESTS=1`이다. DSA 포트 커널 시험과 회귀 시험(`aml/src/bench/test_dsa_port_regression.py`)을 먼저 실행한다.
-- 각 작업의 첫 단계가 출력 동등성의 기준이다. FP8 작업은 `scr-A`, NVFP4 1노드 작업은 `scr-D`, NVFP4 2노드 작업은 `scr-Dx1`이다.
-- 실패하거나 `-1`로 다시 띄울 것으로 예상하는 구성은 계획의 끝에 둔다. FP8 작업의 C16과 B0dcp, NVFP4 1노드 작업의 D8, 2노드 작업의 PD다. 이 구성이 노드를 정리되지 않은 상태로 남겨도 앞에서 측정한 구성에는 영향이 없다.
+- 예상 시간은 10-21 측정의 기동 시간(구성당 4~8분)과 Part R 시간(약 20분)으로 추정했다. 구성 하나는 35~45분, 도착률 격자를 실행하는 2노드 NVFP4 구성은 60~70분이 걸린다고 본다. `-1`로 다시 띄울 것으로 예상하는 C16과 D8은 45~50분, 기동 실패를 예상하는 B0dcp는 약 10분으로 잡았다. FP8 DP 작업은 스크리닝에서 잰 단계 시간(A 약 36분, 다른 구성 약 37분)에 C16m의 재기동 약 15분을 더했다. PD 재실행 작업은 Dref 약 15분, NIXL 사전 점검 약 5분, PD 60~70분으로 잡았다.
+- 스크리닝 작업은 모두 `ROUND=0`이다. 시드가 라운드의 시드와 겹치지 않고, 같은 지점은 모든 구성에서 같은 프롬프트를 받는다.
+- FP8 작업은 `RUN_KERNEL_TESTS=1`이다. DSA 포트 커널 시험과 회귀 시험(`aml/src/bench/test_dsa_port_regression.py`)을 먼저 실행한다. FP8 DP 작업은 이 시험을 다시 실행하지 않는다.
+- 각 작업의 첫 단계가 출력 동등성의 기준이다. FP8 작업과 FP8 DP 작업은 각각 자기 `scr-A`, NVFP4 1노드 작업은 `scr-D`, NVFP4 2노드 작업은 `scr-Dx1`, PD 재실행 작업은 `scr-Dref`이다.
+- 실패하거나 `-1`로 다시 띄울 것으로 예상하는 구성은 계획의 끝에 둔다. FP8 작업의 C16과 B0dcp, FP8 DP 작업의 C16m, NVFP4 1노드 작업의 D8, 2노드 작업과 PD 재실행 작업의 PD다. 이 구성이 노드를 정리되지 않은 상태로 남겨도 앞에서 측정한 구성에는 영향이 없다.
 - 단계가 실패해도 작업은 다음 단계로 넘어간다. 실패 이유는 단계 결과와 결과 꾸러미(14절)에 남는다. 단계를 시작할 때 노드가 정리되지 않았으면 회수를 한 번 실행한다(8절 2번).
 
 ### 6.2 A100 서빙 패턴 지도
@@ -111,12 +113,12 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 | FP8 TP8×PP2+EP8 (C1), round_robin 전문가 배치 (C1rr) | C1은 10-21 측정, 둘 다 스크리닝 | 전문가 배치 효과(A8) 확인 |
 | FP8 TP16 (B0), TP16+DCP 2 (B0dcp) | B0는 10-21 측정, 둘 다 스크리닝 | 포팅한 sparse MLA가 DCP를 지원하는지 확인한다. B0dcp는 기동 실패를 예상한다(6.7절) |
 | FP8 DP2×TP8+EP16 (C2) | 10-21 측정, 기본 라운드 후보, 스크리닝 | - |
-| FP8 DP4×TP4+EP16 (C4), DP8×TP2+EP16 (C8), DP16×TP1+EP16 (C16) | 스크리닝 | 엔진별 배치 토큰은 6.3절의 규칙을 따른다. C16은 131,072토큰을 담지 못할 것으로 추정한다(6.7절) |
+| FP8 DP4×TP4+EP16 (C4), DP8×TP2+EP16 (C8), DP16×TP1+EP16 (C16) | Ray DP 실행은 기동 실패(측정). mp-multinode 실행 `scr-C4m`, `scr-C8m`, `scr-C16m`을 스크리닝 | 6.8절. 엔진별 배치 토큰은 6.3절의 규칙을 따른다. C16은 131,072토큰을 담지 못할 것으로 추정한다(6.7절) |
 | FP8 TP4×PP4 (A4) | 스크리닝 | - |
 | NVFP4 TP8 (D), TP8+EP8 (E), round_robin 배치 (Err) | D와 E는 10-21 측정, 셋 다 스크리닝 | - |
 | NVFP4 DP8×TP1+EP8 (D8), DP2×TP4+EP8 (D24), TP4×PP2 (D42) | 스크리닝 | D8은 131,072토큰을 담지 못할 것으로 추정한다(6.7절) |
 | NVFP4 D×2 (노드마다 서버 1개와 부하 분산기) | `scr-Dx2`, 별도 D×2 작업 | 12절의 통과 기준을 쓴다 |
-| NVFP4 PD (프리필·디코드 분리, NixlConnector) | `scr-PD` (실험) | 선택 규칙의 후보가 아니다(6.5절) |
+| NVFP4 PD (프리필·디코드 분리, NixlConnector) | `scr-PD` (실험). 스크리닝에서 기동 실패(측정), PD 재실행 작업에서 다시 측정 | 선택 규칙의 후보가 아니다(6.5절) |
 | DeepEP all2all, DeepGEMM, FlashMLA, DBO | A100에서 불가 | SM90 이상이 필요하다 |
 | FP8 KV 캐시 | 불가 | 포팅한 TRITON_MLA_SPARSE 백엔드는 auto, fp16, bf16만 지원한다 |
 | EAGLE3 추측 디코딩 | 불가 | 포팅한 Triton MLA 디코드는 요청당 쿼리 1개만 처리한다 |
@@ -134,6 +136,9 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 | C4 | FP8 | 2 | 4,096 | `--data-parallel-size 4 --data-parallel-size-local 2 --tensor-parallel-size 4 --data-parallel-backend ray --enable-expert-parallel --all2all-backend allgather_reducescatter`, `VLLM_RAY_DP_PACK_STRATEGY=strict` |
 | C8 | FP8 | 2 | 2,048 | C4와 같고 `--data-parallel-size 8 --data-parallel-size-local 4 --tensor-parallel-size 2` |
 | C16 | FP8 | 2 | 1,024 | C4와 같고 `--data-parallel-size 16 --data-parallel-size-local 8 --tensor-parallel-size 1` |
+| C4m | FP8 | 2 | 4,096 | node0: `--tensor-parallel-size 4 --data-parallel-size 4 --data-parallel-size-local 2 --data-parallel-backend mp --distributed-executor-backend mp --enable-expert-parallel --all2all-backend allgather_reducescatter --data-parallel-address <node0 주소> --data-parallel-rpc-port 13345`. node1: API 서버 플래그를 뺀 같은 플래그와 `--headless --data-parallel-start-rank 2`. `VLLM_HOST_IP`는 각 노드의 주소(6.8절) |
+| C8m | FP8 | 2 | 2,048 | C4m과 같고 `--tensor-parallel-size 2 --data-parallel-size 8 --data-parallel-size-local 4`, node1의 시작 랭크 4 |
+| C16m | FP8 | 2 | 1,024 | C4m과 같고 `--tensor-parallel-size 1 --data-parallel-size 16 --data-parallel-size-local 8`, node1의 시작 랭크 8 |
 | E | NVFP4 | 1 | 8,192 | `--tensor-parallel-size 8 --distributed-executor-backend mp --enable-expert-parallel` |
 | Err | NVFP4 | 1 | 8,192 | E와 같고 `--expert-placement-strategy round_robin` |
 | D8 | NVFP4 | 1 | 1,024 | `--data-parallel-size 8 --data-parallel-size-local 8 --tensor-parallel-size 1 --data-parallel-backend mp --distributed-executor-backend mp --enable-expert-parallel --all2all-backend allgather_reducescatter` |
@@ -152,7 +157,7 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 
 **그 밖의 정의**
 
-- 1라운드 민감도 실행용으로 `C4s`, `C8s`, `C16s`를 정의했다. 엔진별 한도를 DP 크기로 나눠 A와 같은 시스템 전체 한도(128시퀀스, 8,192토큰)를 쓴다. C2-s와 같은 취지다.
+- 1라운드 민감도 실행용으로 `C4s`, `C8s`, `C16s`와 mp-multinode용 `C4ms`, `C8ms`, `C16ms`를 정의했다. 엔진별 한도를 DP 크기로 나눠 A와 같은 시스템 전체 한도(128시퀀스, 8,192토큰)를 쓴다. C2-s와 같은 취지다.
 - `scr-A-auto` 외의 스크리닝 단계는 공통 `--max-model-len` 131,072로 시작한다.
 
 ### 6.4 스크리닝 단계 하나의 순서
@@ -160,6 +165,8 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 1. 서버를 띄운다. 정리 상태 확인과 회수, 실제 설정 검사, FP8 2노드 단계의 NCCL 검사는 8절과 같다.
 2. 서버가 vLLM의 "larger than the available KV cache memory" 오류로 끝나면, `--max-model-len -1`로 한 번만 다시 띄운다. 요청 값과 vLLM이 추정한 길이를 시작 기록(`start-<단계>.json`)에 남긴다. 이 구성은 라운드 후보가 될 수 없다.
 3. 시작 사실을 기록한다. 정상 상태까지 걸린 시간, `/v1/models`의 `max_model_len`, 엔진별 KV 토큰 수(`vllm:cache_config_info`와 로그의 "GPU KV cache size")다.
+   - `max_model_len`은 서버가 실제로 제공한 값(시작 기록, `-1`이면 `/v1/models`)을 쓴다. 엔진 설정 줄의 값은 자동 맞춤 전의 모델 기본값일 수 있다. 예를 들어 `-1`로 다시 띄운 D8은 31,616을 제공했지만 설정 줄에는 262,144가 남았다(측정).
+   - node1에서 따로 도는 엔진(D×2의 두 번째 서버, PD의 디코드 서버, mp-multinode의 headless 엔진)은 node0의 로그에 나오지 않는다. 그 엔진의 KV 토큰은 node1의 로그에서 Ray로 읽어 합계에 더한다. 읽지 못하면 끌어온 로그 끝부분에서 찾고, 그래도 없으면 "node0 only"로 표시한다.
 4. 짧은 출력 동등성을 잰다. 문서 4개(`ko-01-constitution`, `ko-06-unsu-joeun-nal`, `en-01-us-constitution`, `en-04-pride-and-prejudice`)를 2,048토큰으로 잘라 P1을 실행한다. 같은 문서의 앞 512토큰으로 그리디 128토큰(P2)을 실행한다.
 5. 워밍업(입력 1K·8K 묶음)을 실행하고 결과를 버린다.
 6. Part R 전체를 측정한다. 동시 1(4개)과 동시 32(64개)를 1K·8K로, 동시 1을 32K로 측정한다. 32K·동시 32(32개)는 출력을 64토큰으로 줄여 실행 중 요청, KV 사용률, 선점만 기록한다.
@@ -184,12 +191,29 @@ PD는 실험 단계다. 실패하면 "experimental phase:"로 시작하는 기�
 - 프록시가 정상 상태가 되면 프록시를 거쳐 확인 요청 1개를 보낸다. 짧은 프롬프트, `max_tokens` 16, 제한 180초다. 그다음 `/lb/stats`에서 `missing_kv_transfer_params`가 0이고 프록시 오류가 없어야 한다. 하나라도 어긋나면 "experimental phase: PD smoke failed: <이유>"를 기록하고 측정 스위트를 실행하지 않는다. 실패 보고에는 프록시 로그의 끝부분(4 KB)도 붙인다.
 - 실험 단계의 클라이언트는 `timeout` 5,400초(`BENCH_EXPERIMENTAL_TIMEOUT`) 안에서 실행한다. 제한에 걸리면 그 사실을 단계 결과에 기록한다.
 - 서버 2개를 쓰는 단계(`dx2-*`, `scr-Dx2`, `scr-PD`)가 실패하면, node1의 `vllm-<단계>-replica1.log` 끝부분(최대 200줄, 16 KB)을 Ray로 가져와 실패 보고(`node0.<단계>.failure` 또는 `node0.<단계>.client_failure`)에 붙인다. 결과 꾸러미에도 단계마다 이 로그의 끝부분(`replica_tails`)이 들어간다.
+**스크리닝의 기동 실패와 재실행**
+
+- 측정: 스크리닝(main 5dc653b)의 `scr-PD`는 기동 중 `register_kv_caches`에서 실패했다. NIXL 오류는 `NIXL_ERR_BACKEND`였고, UCX가 "VRAM memory is detected as host by UCX"를 냈다.
+- 확인: 이미지의 nixl-cu12 1.2.0에는 CUDA를 지원하도록 빌드한 UCX 1.21.0이 들어 있다. 다시 빌드할 필요는 없다.
+- 남은 원인(추정): 첫째, UCX의 메모리 종류 캐시가 GPU 할당을 놓쳤을 수 있다. 대책은 `UCX_MEMTYPE_CACHE=n`이다. 둘째, SM80 포트가 길이 0인 KV 서술자를 등록했을 수 있다. UCX는 길이 0인 등록을 호스트 메모리로 분류한다. UCX의 CUDA 모듈이 적재되지 않았을 가능성은 낮다. 로그에 "UCX CUDA support was not found" 경고가 없다.
+- `UCX_TLS`는 설정하지 않는다. 설정하면 InfiniBand 전송이 빠진다.
+
+PD 재실행 작업(`serving-screen-nvfp4-pd-nd96.yml`)의 PD 단계는 다음 순서로 실행한다.
+
+1. 서버를 띄우기 전에 `nixl_preflight.py`를 node0과 node1에서 실행한다. node1에서는 그 노드에 고정한 Ray 작업이 실행한다. 기본 환경으로 한 번, `UCX_MEMTYPE_CACHE=n`으로 한 번 실행하고, 실행마다 120초로 제한한다.
+2. 사전 점검은 GPU 1개에서 다음을 확인한다. 로더 캐시의 `libcuda`, `libnvidia-ml`, `libcudart`, NIXL 에이전트를 만든 뒤 UCX CUDA 전송(`libuct_cuda`)의 적재, 첫 등록 전과 후에 할당한 GPU 메모리의 VRAM 등록, 길이 0 서술자(대조군, 실패가 정상)다. 결과는 JSON 한 줄이고, 환경 변수는 `UCX_*`와 `NIXL_*`만 기록한다.
+3. 기본 환경이 두 노드에서 통과하면 두 서버를 기본 환경으로 띄운다. 기본 환경이 통과하지 못하고 `UCX_MEMTYPE_CACHE=n`이 두 노드에서 통과하면 두 서버에 그 값을 준다. 둘 다 통과하지 못하면 서버를 띄우지 않고 "experimental phase: PD not possible here: NIXL preflight failed (<이유>)"를 기록한다. 사전 점검 결과는 `node0.<단계>.preflight`와 결과 꾸러미에 남는다.
+4. 사전 점검을 통과했는데도 기동이 "VRAM memory is detected as host"로 실패하면, 두 서버를 `VLLM_LOGGING_LEVEL=DEBUG`로 한 번 다시 띄운다. 두 로그의 "Registering descs" 줄과 길이 0 서술자 수를 `node0.<단계>.failure`에 넣고 단계를 끝낸다. 측정 스위트는 실행하지 않는다.
+5. 기동에 성공하면 확인 요청, Part R, dx2 격자를 위와 같이 실행한다.
+
+- `scr-Dref`는 node0에서 D를 띄워 시작 사실과 짧은 출력 동등성만 기록한다. PD 재실행 작업의 출력 동등성 기준이다.
+- 재실행 작업에는 Dx1과 Dx2가 없다. 그래서 PD의 비교 쌍(PD 대 D, PD 대 D×2)은 이전 2노드 작업의 Dx1과 Dx2를 쓰고, `select` 출력에 "cross-job"으로 표시한다. 두 작업의 PD 실행은 모두 보고한다(`scr-PD`, `scr-PD@<작업>`).
 - 근거: vLLM v0.23.0의 `docs/features/nixl_connector_usage.md`와 `tests/v1/kv_connector/nixl_integration/toy_proxy_server.py`다. v0.23에서 NixlConnector의 `kv_both` 역할은 폐기 예정이다. 이미지에는 nixl 1.2.0이 들어 있다(10-21 실행의 환경 기록).
 
 ### 6.6 선택 규칙 (사전 등록)
 
 - A는 항상 라운드에 들어간다.
-- FP8 선택은 A가 아닌 구성 중에서 고른다. 후보는 `scr-C2`, `scr-C4`, `scr-C8`, `scr-C16`, `scr-C1`, `scr-C1rr`, `scr-B0`, `scr-B0dcp`, `scr-A4` 중 자격을 갖춘 구성이다. 이 중 R/isl8192-c32의 출력 tok/s가 가장 높은 구성 1개를 고른다. 기준은 `scr-A`다.
+- FP8 선택은 A가 아닌 구성 중에서 고른다. 후보는 `scr-C2`, `scr-C4`, `scr-C4m`, `scr-C8`, `scr-C8m`, `scr-C16`, `scr-C16m`, `scr-C1`, `scr-C1rr`, `scr-B0`, `scr-B0dcp`, `scr-A4` 중 자격을 갖춘 구성이다. 이 중 R/isl8192-c32의 출력 tok/s가 가장 높은 구성 1개를 고른다. 기준은 `scr-A`다.
 - NVFP4 후보는 `scr-D`, `scr-E`, `scr-Err`, `scr-D8`, `scr-D24`, `scr-D42` 중 자격을 갖춘 구성이다. 같은 지표로 1개를 고른다. D 자신도 후보다. 기준은 `scr-D`다.
 - 자격은 다음 다섯 가지를 모두 만족하는 것이다.
   1. 단계가 통과했다. 정상적으로 시작했고, 실제 설정과 NCCL 게이트를 통과했고, 스크리닝을 마쳤다.
@@ -198,6 +222,8 @@ PD는 실험 단계다. 실패하면 "experimental phase:"로 시작하는 기�
   4. 순위 지점(R/isl8192-c32)이 유효하다. 이 지점의 kv-bound 또는 capacity-bound 표시는 제외 사유가 아니다.
   5. 단일 요청 TPOT(입력 1K와 8K 각각)이 기준의 1.5배(FP8) 또는 1.2배(NVFP4) 이하다.
 - 값이 같으면 목록의 앞 구성을 고른다.
+- 후보의 출력 동등성과 TPOT 기준은 같은 작업의 기준 단계다. 예를 들어 `scr-C4m`은 FP8 DP 작업의 `scr-A`와 비교한다.
+- 같은 단계가 여러 작업의 꾸러미에 있으면(두 FP8 작업의 `scr-A` 등) 작업마다 따로 보고한다. 두 번째부터는 `<단계>@<작업>`으로 표시한다. 실패한 Ray 실행 `scr-C4`와 mp-multinode 실행 `scr-C4m`도 서로 다른 실행으로 함께 보고한다.
 - 순위 지점의 kv-bound·capacity-bound 표시는 점수 옆에 보고한다. 그 지점의 최대 KV 사용률과 최대 실행 요청 수도 함께 보고한다.
 - 표시로 제외하지 않는 이유: 이 지점은 32 × 9,216 = 294,912 토큰을 담아야 한다. D, E, Err(KV 토큰 약 23.2만~25.4만)와 B0(약 31만, 10-21 측정의 최대 KV 사용률 0.953)는 이 지점에서 항상 kv-bound다. 표시로 제외하면 D, E, Err는 선택될 수 없다.
 - D×2: `scr-Dx2`의 W1 λ*(기준 SLO)가 `scr-Dx1`의 1.9배 이상이면 D×2 작업을 실행한다. 격자 밖의 λ*는 한계값으로 쓴다. 한계값으로 판정할 수 없으면 D×2 작업이 전체 격자로 판정한다.
@@ -228,7 +254,41 @@ PD는 실험 단계다. 실패하면 "experimental phase:"로 시작하는 기�
 | PD | 서버마다 48.5 | 서버마다 약 23만 | 예 |
 
 - C16과 D8은 라운드 후보가 될 수 없을 것으로 예상한다. 그래도 엔진을 모두 합친 KV 용량이 크므로 두 구성의 수치를 보고한다.
+- C4m, C8m, C16m의 추정값은 C4, C8, C16과 같다. 실행 방식은 메모리 사용을 바꾸지 않는다. C16m은 두 노드 모두 `-1`로 다시 띄울 것으로 예상한다. D8은 스크리닝에서 엔진당 KV 32,896토큰을 기록했다(측정, 추정 약 4.6만). 따라서 C16m의 실제 값은 추정보다 작을 수 있다.
 - B0dcp의 기동 실패를 예상하는 근거: vLLM의 `check_attention_cp_compatibility`는 어텐션 백엔드가 디코드 softmax LSE를 돌려주는지 검사한다(`vllm/v1/worker/cp_utils.py:30-37`, 호출 위치 `vllm/v1/worker/gpu_model_runner.py:6804`). 포팅한 `TritonMLASparseImpl`은 `can_return_lse_for_decode`를 설정하지 않으므로 기본값 False를 쓴다(`vllm/v1/attention/backend.py:707, 761-763`).
+
+### 6.8 Ray DP 기동 실패와 mp-multinode 실행
+
+**측정.** 스크리닝(main 5dc653b)에서 C4, C8, C16은 기동 약 70초 뒤 실패했다. 호출 경로는 `RayWorkerProc.initialize_worker` → `WorkerProc.__init__` → `PyNcclCommunicator` → `ncclCommInitRank`였고, NCCL 오류는 "invalid usage"였다. 세 구성은 Ray DP 백엔드로 노드마다 엔진을 2개 이상 둔다. 같은 스크리닝에서 노드마다 엔진이 1개인 C2(Ray DP)와, 한 노드에 엔진을 여러 개 둔 D8·D24(mp DP)는 통과했다.
+
+**원인(추론).**
+
+- 소거법으로 확인: NCCL 2.28.9에서 `ncclCommInitRank`가 "invalid usage"를 돌려주는 경로 가운데 이 구성에 남는 것은 중복 GPU 검사("Duplicate GPU detected", `src/init.cc:903-907`)뿐이다.
+- 추정: 같은 노드의 두 엔진을 처음 묶는 통신기는 DP 그룹이다. 두 엔진의 작업자가 같은 GPU에 묶였다. 원인 위치는 RayExecutorV2가 이미 실행 중인 작업자의 `CUDA_VISIBLE_DEVICES`를 다시 쓰는 부분(`vllm/v1/executor/ray_executor_v2.py:368-397`)으로 추정한다.
+- 미확인: 충돌을 일으킨 정확한 문장은 찾지 못했다. NCCL 로그의 "Duplicate GPU detected" 줄과 랭크별 `nvmlDev` 값으로 확인할 수 있다.
+
+**대응.** Ray 구성(C4, C8, C16)과 실패 기록은 그대로 둔다. 같은 위상을 vLLM 문서의 다중 노드 multiprocessing DP 실행(`docs/serving/data_parallel_deployment.md`)으로 다시 측정한다. 이 문서는 이 실행 방식을 mp-multinode라고 부른다. 단계는 `scr-C4m`, `scr-C8m`, `scr-C16m`이고, 보고서의 구성 이름은 C4, C8, C16이다.
+
+| 단계 | TP | DP | 노드당 엔진 (L) | node1의 시작 랭크 | 엔진별 배치 토큰 |
+|---|---|---|---|---|---|
+| `scr-C4m` | 4 | 4 | 2 | 2 | 4,096 |
+| `scr-C8m` | 2 | 8 | 4 | 4 | 2,048 |
+| `scr-C16m` | 1 | 16 | 8 | 8 | 1,024 |
+
+한 단계의 실행 순서는 다음과 같다.
+
+1. node0에서 `vllm serve`를 띄운다. 공통 플래그에 `--data-parallel-backend mp --distributed-executor-backend mp --data-parallel-size DP --data-parallel-size-local L --data-parallel-address <node0 주소> --data-parallel-rpc-port 13345`를 더한다. API 서버 플래그(`--served-model-name`, `--host`, `--port`, `--api-server-count 1`, `--tool-call-parser`, `--enable-auto-tool-choice`, `--no-enable-log-requests`)는 node0에만 준다. `VLLM_HOST_IP`는 node0의 주소다.
+2. 몇 초 안에 node1에서 Ray 분리 actor가 `vllm serve <모델> <같은 엔진 플래그> --headless --data-parallel-start-rank L`을 띄운다. `VLLM_HOST_IP`는 node1의 주소다.
+3. node0의 `/health`만 기다린다. node0의 API 서버는 두 노드의 DP 엔진이 모두 연결된 뒤에 응답한다. 기다리는 동안 node1의 프로세스를 1분마다 확인한다. node0이나 node1의 서버가 끝나면 바로 실패로 기록한다. 제한 시간은 다른 단계와 같다.
+4. 단계가 끝나거나 실패하면 node1의 프로세스 그룹을 멈추고 node0을 멈춘다. 정리 상태 확인은 두 노드를 모두 본다.
+
+- 엔진 플래그는 두 노드에서 같다. node0은 DP 엔진의 병렬 설정 해시를 비교한다. `--reasoning-parser`는 vLLM 0.23에서 엔진 인자이므로(`vllm/engine/arg_utils.py:610, 2171-2177, 2441-2445`) 두 노드에 모두 준다.
+- node0에는 `--data-parallel-start-rank`를 주지 않는다. 이 옵션이 있으면 vLLM이 hybrid 부하 분산으로 바뀐다. node1에는 `--api-server-count`를 주지 않는다. `--headless`와 함께 주면 vLLM이 오류를 낸다.
+- 길이 대체: KV 용량 오류는 어느 노드의 로그에든 나올 수 있다. node0의 로그와 node1 로그의 끝부분을 모두 확인한다. 오류가 있으면 두 노드를 모두 멈추고 두 노드를 `--max-model-len -1`로 다시 띄운다. C16m은 이 경로를 탈 것으로 예상한다(6.7절).
+- 게이트: 실제 설정 검사와 NCCL 검사는 다른 FP8 2노드 단계와 같다. node0의 로그에는 node0의 엔진만 나온다. node1 엔진의 KV 토큰과 DP 랭크 줄은 node1의 로그에서 Ray로 읽어 결과 꾸러미(`peer`)에 넣는다. 이 기록이 없어도 게이트는 실패하지 않는다.
+- 작업: `serving-screen-fp8-dp-nd96.yml`(2노드)이 `scr-A`를 먼저 실행한다. 이 A가 같은 작업의 출력 동등성과 TPOT 기준이다.
+- 선택: `scr-C4m`, `scr-C8m`, `scr-C16m`은 같은 규칙의 FP8 후보다(6.6절). 선택되면 `ROUND_LAYOUTS`에 `C4m` 같은 이름이 들어가고, 라운드도 같은 실행 방식을 쓴다. 1라운드 민감도 실행은 `C4ms`, `C8ms`, `C16ms`다.
+- 위험(미확인): vLLM 이슈 #43547은 MoE와 DP를 함께 쓸 때 약 1시간 뒤 멈추는 현상을 보고한다. 이 현상은 장시간 부하에서 C2와 mp-multinode 구성 모두에 영향을 줄 수 있다.
 
 ## 7. 라운드, 순서, 시드
 
@@ -423,19 +483,22 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 1. 템플릿을 렌더링한다. 결과는 `aml/jobs/.rendered/`에 생긴다. 측정 템플릿은 `aml/src`와 `aml/src/bench`의 파일을 고정 커밋에서 내려받아 파일마다 해시를 확인한다.
 
    ```bash
-   python aml/render_job.py aml/jobs/serving-screen-fp8-nd96.yml aml/jobs/serving-screen-nvfp4-nd96.yml \
-     aml/jobs/serving-screen-nvfp4-2node-nd96.yml aml/jobs/slo-round-nd96.yml aml/jobs/slo-nvfp4-2replica-nd96.yml
+   python aml/render_job.py aml/jobs/serving-screen-fp8-nd96.yml aml/jobs/serving-screen-fp8-dp-nd96.yml \
+     aml/jobs/serving-screen-nvfp4-nd96.yml aml/jobs/serving-screen-nvfp4-2node-nd96.yml \
+     aml/jobs/serving-screen-nvfp4-pd-nd96.yml aml/jobs/slo-round-nd96.yml aml/jobs/slo-nvfp4-2replica-nd96.yml
    ```
 
-2. 스크리닝 작업 3개를 제출한다. 저우선순위 할당량은 ND96 3대다. 2노드 작업 하나와 1노드 작업은 함께 실행할 수 있지만, 2노드 작업 둘은 차례로 실행해야 한다.
+2. 스크리닝 작업 5개를 제출한다. FP8 DP 작업과 PD 재실행 작업은 첫 스크리닝 결과로 추가한 작업이다. 저우선순위 할당량은 ND96 3대다. 2노드 작업 하나와 1노드 작업은 함께 실행할 수 있지만, 2노드 작업 둘은 차례로 실행해야 한다.
 
    ```bash
    az ml job create --file aml/jobs/.rendered/serving-screen-fp8-nd96.yml --workspace-name <workspace> --resource-group <resource-group>
+   az ml job create --file aml/jobs/.rendered/serving-screen-fp8-dp-nd96.yml --workspace-name <workspace> --resource-group <resource-group>
    az ml job create --file aml/jobs/.rendered/serving-screen-nvfp4-nd96.yml --workspace-name <workspace> --resource-group <resource-group>
    az ml job create --file aml/jobs/.rendered/serving-screen-nvfp4-2node-nd96.yml --workspace-name <workspace> --resource-group <resource-group>
+   az ml job create --file aml/jobs/.rendered/serving-screen-nvfp4-pd-nd96.yml --workspace-name <workspace> --resource-group <resource-group>
    ```
 
-3. 결과를 내려받는다. 결과는 단계마다 갱신되므로 작업이 끝나기 전에도 받을 수 있다. NVFP4 작업 둘도 같은 방법으로 `screen-nvfp4.json`, `screen-nvfp4-2node.json`에 받는다.
+3. 결과를 내려받는다. 결과는 단계마다 갱신되므로 작업이 끝나기 전에도 받을 수 있다. 나머지 작업도 같은 방법으로 `screen-fp8-dp.json`, `screen-nvfp4.json`, `screen-nvfp4-2node.json`, `screen-nvfp4-pd.json`에 받는다.
 
    ```bash
    AXK2_MLFLOW_URI=<mlflow-tracking-uri> python aml/fetch_results.py show <job-name> > screen-fp8.json
@@ -444,8 +507,8 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 4. 선택 규칙을 적용한다.
 
    ```bash
-   python aml/src/bench/bench_stats.py select screen-fp8.json screen-nvfp4.json screen-nvfp4-2node.json \
-     --out screen-selection.json --md screen-selection.md
+   python aml/src/bench/bench_stats.py select screen-fp8.json screen-fp8-dp.json screen-nvfp4.json screen-nvfp4-2node.json \
+     screen-nvfp4-pd.json --out screen-selection.json --md screen-selection.md
    ```
 
 5. 출력의 `round_layouts`, 공통 `--max-model-len`, 장문 P1 포함 여부를 확정한다. `screen-selection.json`의 `rates`와 명령의 화면 출력에 라운드가 찾을 `SLO_RATES_<구성>`과 `SOAK_RATES`의 키가 있다. 바뀐 값이 있으면 `slo_protocol.json`을 고친다. 그다음 사전 등록 커밋을 만들고 1번부터 다시 렌더링한다.
@@ -498,7 +561,7 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 | 라운드 (계획 추정) | 약 55 | 약 705달러 |
 | **합계 (계획 추정)** | **약 70** | **약 900달러** |
 
-- 템플릿 설명의 예상 시간으로 다시 계산하면 스크리닝은 약 26.5노드시간(Spot 약 340달러)이다. FP8 작업이 약 14, NVFP4 1노드 작업이 약 4.5, NVFP4 2노드 작업이 약 8노드시간이다. 계획 추정보다 큰 주된 이유는 구성마다 Part R 전체(출력 1,024토큰, 약 20분)를 실행하는 데 있다. 이 값도 추정이며, 실행 뒤 실제 시간으로 갱신한다.
+- 템플릿 설명의 예상 시간으로 다시 계산하면 스크리닝은 약 37노드시간(Spot 약 475달러)이다. FP8 작업이 약 14, FP8 DP 작업이 약 6.4, NVFP4 1노드 작업이 약 4.5, NVFP4 2노드 작업이 약 8, PD 재실행 작업이 약 4노드시간이다. FP8 DP 작업(Spot 약 83달러)은 Ray DP 실행이 실패해 추가했고, PD 재실행 작업(Spot 약 52달러)은 PD 기동이 실패해 추가했다. 계획 추정보다 큰 주된 이유는 구성마다 Part R 전체(출력 1,024토큰, 약 20분)를 실행하는 데 있다. 이 값도 추정이며, 실행 뒤 실제 시간으로 갱신한다.
 - 라운드의 계획 추정은 아래 표의 최소안 합계(약 54.7노드시간)다. 아래 표는 [검토 결과](report/REVIEW_2026-11-09.md) 8.6절의 추정을 옮긴 것이다.
 
 | 항목 | 2노드 할당 시간 | 노드시간 | Spot | 종량제 |
@@ -520,7 +583,7 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 - 진단 작업의 `diag-B0`(DCP 비교 기준): 0.3시간 이내로 추정한다.
 - 단계마다 결과 꾸러미 보고: 단계당 1분 이내로 추정한다. 꾸러미 생성 시간은 합성 데이터에서 5.7초로 쟀다(14절).
 - 정리되지 않은 노드의 회수: 단계당 최대 300초다. 노드가 깨끗하면 실행하지 않는다.
-- 제한 시간은 라운드 작업 12시간, 진단 작업 5시간, D×2 작업 6시간, 스크리닝 작업 12·8·7시간이다.
+- 제한 시간은 라운드 작업 12시간, 진단 작업 5시간, D×2 작업 6시간, 스크리닝 작업 12·6·8·7·3시간이다.
 
 ## 17. 사전 등록 전에 정할 사항과 한계
 
@@ -536,10 +599,14 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 
 ### 17.2 한계
 
-- GPU와 Azure에서 실행하지 않았다. 확인은 합성 데이터 단위 테스트, 가짜 백엔드를 쓴 프록시 시험, 셸 구문 검사로만 했다.
-- 스크리닝 구성 중 A4, C4, C8, C16, Err, D8, D24, D42, PD는 한 번도 띄워 보지 않았다. 메모리 추정(6.7절)이 틀릴 수 있다. C16과 D8의 재기동, B0dcp의 기동 실패도 소스 점검에 따른 예측이다.
+- 라운드와 mp-multinode 실행은 GPU와 Azure에서 실행하지 않았다. 이 부분의 확인은 합성 데이터 단위 테스트, 가짜 백엔드를 쓴 프록시 시험, 셸 구문 검사로만 했다.
+- 스크리닝 구성은 main 5dc653b로 한 번씩 실행했다. 측정값은 작업 기록의 결과 꾸러미에 있고, 이 문서의 메모리·KV 값(6.7절)은 아직 추정값이다. C4m, C8m, C16m은 아직 띄워 보지 않았다.
+- mp-multinode의 node1 엔진 기록은 node1 로그를 Ray로 읽어서 얻는다. Ray가 멈췄거나 로그가 없으면 KV 합계는 "node0 only"로 남는다.
 - DP×EP 구성의 엔진별 배치 토큰을 줄이면 긴 프롬프트의 프리필이 더 많은 스텝으로 나뉘어 TTFT가 늘 수 있다(추정). 스크리닝 결과는 6.3절의 설정에서 얻은 값이다.
 - 회수는 규칙에 맞는 프로세스, placement group, 포트만 정리한다. 규칙에 맞지 않는 GPU 프로세스, 프로세스 없이 남은 GPU 메모리, GPU 오류는 회수하지 못한다. 그러면 단계는 실패로 기록된다.
+- NIXL 사전 점검은 노드마다 GPU 0 하나만 검사한다. PD 서버는 노드마다 GPU 8개를 쓴다.
+- `UCX_MEMTYPE_CACHE=n`은 UCX가 메모리 종류를 매번 확인하게 하므로 전송이 느려질 수 있다(추정). 이 값으로 띄운 PD는 단계 기록에 그 사실이 남는다.
+- 길이 0 서술자 가설은 디버그 재기동의 "Registering descs" 줄로만 확인한다. 이 하네스는 포트를 고치지 않는다.
 - PD에서 NIXL의 UCX가 A100 노드 사이에서 GPU 메모리를 직접 읽는지는 확인하지 않았다. UCX가 TCP나 호스트 메모리 경유를 고르면 느리다. 지점별 InfiniBand 송수신량과 서버 로그의 NIXL·UCX 줄로 확인한다.
 - `report.py`는 MLflow를 쓸 수 없어도 0으로 끝난다. `bench_stats.py`는 출력의 경고 문구로 전송 실패를 판단한다. `report.py`의 경고 문구가 바뀌면 실패를 놓칠 수 있다. 작업 끝의 보고가 모든 키를 다시 보낸다.
 - node1의 계측 파일은 Ray가 살아 있을 때만 가져온다. 작업이 끝날 때 Ray가 이미 멈췄으면 마지막으로 가져온 사본을 쓴다.
@@ -557,15 +624,18 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 | 파일 | 내용 |
 |---|---|
 | `aml/src/bench/slo_protocol.json` | 구성, 공통 플래그, 워크로드, 격자, SLO, 시드, 게이트, 판정 규칙, 스크리닝과 선택 규칙, 추정, 가격 |
-| `aml/src/bench/protocol.sh` | `entry.sh`가 읽는 측정 단계 실행부: 계측, 정리 상태 확인과 회수, 실제 설정·NCCL 검사, 길이 대체, 프로세스 그룹 종료, D×2 복제본과 PD 디코드 서버, PD 확인 요청, 결과 꾸러미 보고 |
+| `aml/src/bench/protocol.sh` | `entry.sh`가 읽는 측정 단계 실행부: 계측, 정리 상태 확인과 회수, 실제 설정·NCCL 검사, 길이 대체, 프로세스 그룹 종료, D×2 복제본과 PD 디코드 서버, mp-multinode의 headless DP 엔진, NIXL 사전 점검과 디버그 재기동, PD 확인 요청, 결과 꾸러미 보고 |
 | `aml/src/bench/slo_suites.py` | 단계 설정 생성, 라운드 계획, 측정 스위트(parity, warmup, partr, slo, realtext, soak, paritylong, screen), 엔진별 `/metrics` 시계열, 게이트 |
 | `aml/src/bench/bench_stats.py` | 꾸러미 생성과 보고, 라운드 분석과 판정, 스크리닝 선택, Markdown 요약 |
 | `aml/src/bench/lb_proxy.py` | D×2용 부하 분산기, PD용 프리필·디코드 프록시, 확인 요청(`--smoke`) |
-| `aml/src/bench/node_tools.py` | Ray 작업으로 node1 파일과 로그 끝부분을 가져오고, 정리되지 않은 노드를 회수한다 |
+| `aml/src/bench/node_tools.py` | Ray 작업으로 node1 파일과 로그 끝부분·기록을 가져오고, 정리되지 않은 노드를 회수하고, 두 노드에서 NIXL 사전 점검을 실행하고, PD 서버의 서술자 줄을 모은다 |
+| `aml/src/bench/nixl_preflight.py` | PD 서버를 띄우기 전 NIXL·UCX의 VRAM 등록 사전 점검(GPU 1개, JSON 한 줄) |
 | `aml/src/bench/parity_corpus.json` | 출력 동등성과 W1-real용 공유 저작물·법령 텍스트 |
 | `aml/jobs/serving-screen-fp8-nd96.yml` | FP8 스크리닝 작업 |
+| `aml/jobs/serving-screen-fp8-dp-nd96.yml` | FP8 DP×EP 스크리닝 작업(mp-multinode 실행) |
 | `aml/jobs/serving-screen-nvfp4-nd96.yml` | NVFP4 1노드 스크리닝 작업 |
 | `aml/jobs/serving-screen-nvfp4-2node-nd96.yml` | NVFP4 2노드 스크리닝 작업(D×2, PD) |
+| `aml/jobs/serving-screen-nvfp4-pd-nd96.yml` | PD 재실행 작업(Dref, NIXL 사전 점검 뒤 PD) |
 | `aml/jobs/serving-diag-nd96.yml` | 진단 작업 |
 | `aml/jobs/slo-round-nd96.yml` | 라운드 작업 |
 | `aml/jobs/slo-nvfp4-2replica-nd96.yml` | D×2 작업 |

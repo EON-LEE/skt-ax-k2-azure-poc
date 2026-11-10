@@ -1,0 +1,50 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: serving-screen-fp8-dp-2xND96amsr-A100
+description: >-
+  Screening of the FP8 DP x EP layouts C4, C8 and C16 of skt/A.X-K2 on two 8xA100-80GB nodes with vLLM's
+  documented multi-node multiprocessing DP launch, one launch each (docs/BENCHMARK_PROTOCOL.md, screening): A
+  first (TP8 x PP2, the parity and TPOT reference of this job), then C4m, C8m and last C16m (a -1 relaunch of both
+  nodes is expected). Node0 serves the API and its DP ranks; node1 runs the other ranks headless
+  (--headless --data-parallel-start-rank) with identical engine flags; only node0's /health is awaited. The Ray DP
+  launch of C4, C8 and C16 failed at start (NCCL invalid usage) and stays recorded as it is. Common flags; 16,384 /
+  DP batched tokens per engine; FP8 only over InfiniBand. Each launch records start facts, short parity against A,
+  Part R and one Poisson W1 point; a dirty node is reclaimed once; every failure is recorded and the job goes on.
+  Results reach the job record after every phase (slo.package). Expected about 3.2 h (setup 0.5 h, A about 36
+  min, C4m and C8m about 37 min each, C16m about 37 min plus about 15 min for its relaunch); timeout 6 h. ROUND 0
+  keeps the seeds apart from the rounds. The scripts are downloaded from the pinned commit of this public
+  repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 2
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  PHASE_PLAN: "scr-A scr-C4m scr-C8m scr-C16m"
+  ROUND: "0"
+  IB_PROBE: "1"
+  FULL_HEALTH_TIMEOUT: "1200"
+  DOWNLOAD_TIMEOUT: "5400"
+  RUN_KERNEL_TESTS: "0"
+  JOIN_TIMEOUT: "5400"
+  TP: "8"
+  PP: "2"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:4237c6a60cec6ae449854870d01a42665a1166aa
+limits:
+  timeout: 21600
