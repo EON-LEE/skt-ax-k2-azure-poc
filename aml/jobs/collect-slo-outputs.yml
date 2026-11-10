@@ -3,12 +3,13 @@ type: command
 experiment_name: axk2-slo-protocol
 display_name: collect-slo-outputs
 description: >-
-  Read a finished benchmark-protocol job's private artifacts from inside the managed VNet (storage is private
-  by policy) and return them through the job record: the vLLM start-up facts (collect_run_outputs.py) and the
-  compact package that bench_stats.py analyses (per point the gates, steady-state data, per-engine counters,
-  GPU and InfiniBand telemetry; parity against A of the same round; effective configs, NCCL and clean-state
-  summaries), with addresses, job folders and host names removed. Replace __RUN__ with the finished job name
-  before rendering. The scripts are downloaded from the pinned commit of this public repository.
+  FALLBACK ONLY. Every protocol job reports its own results package to the job record (slo.package and
+  slo.package.<launch>, read with aml/fetch_results.py show); use this job only when that failed and a CPU
+  cluster plus read access to the workspace artifact store exist. It reads a finished benchmark-protocol job's
+  private artifacts from inside the managed VNet and returns them through the job record: the vLLM start-up
+  facts (collect_run_outputs.py) and the same package (bench_stats.py package --report), with addresses, job
+  folders and host names removed. Replace __RUN__ with the finished job name and cpu-lp with an existing CPU
+  cluster before rendering. The scripts are downloaded from the pinned commit of this public repository.
 compute: azureml:cpu-lp
 environment:
   image: docker.io/library/python:3.12-slim

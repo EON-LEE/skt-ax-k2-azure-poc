@@ -1,16 +1,23 @@
 """Statistics of the pre-registered serving protocol (slo_protocol.json, docs/BENCHMARK_PROTOCOL.md).
 
-  python3 bench_stats.py package <job outputs folder> [--out package.json] [--report]
-      Inside the workspace (collect-slo-outputs.yml): one compact, sanitized package per job from the raw
-      outputs: per point the gates, the steady-state summary and per-request data, per-engine counter deltas,
-      GPU telemetry and InfiniBand counters of every node over the point; parity against A of the same round;
-      the plans, phase results, effective configs, NCCL and clean-state records, load-balancer stats.
+  python3 bench_stats.py package <job outputs folder> [--out package.json] [--report [--state reported.json]]
+      Inside the job (protocol.sh, after every phase and on exit) or the workspace (collect-slo-outputs.yml):
+      one compact, sanitized package per job from the raw outputs: per point the gates, the steady-state
+      summary and per-request data, per-engine counter deltas, GPU telemetry and InfiniBand counters of every
+      node over the point; parity against A of the same round (screening: the job's first launch); the plans,
+      phase results, start records, effective configs, NCCL and clean-state records, load-balancer stats.
+      --report sends it through report.py as chunked MLflow tags: slo.package (everything but the points, with
+      the list of parts) and slo.package.<launch> (one launch's points), each under 150 chunks of 4,000 chars.
   python3 bench_stats.py analyze <package.json>... --out evidence.json --md summary.md
       Operator side: round validity, lambda* with the bracket gate, cost per 1M output tokens, paired log-ratio
       t-CIs with A/A2 drift correction where A2 measured the metric, decision labels, the A/A noise floor and
       delta_min, the round-extension rule, P99 gating, parity acceptance, soak, D x 2 scaling, diagnostics.
+  python3 bench_stats.py select <screening package.json>... --out selection.json --md selection.md
+      The pre-registered selection rule (slo_protocol.json screen.selection): the round candidates
+      (ROUND_LAYOUTS), the D x 2 decision and every screened launch's facts, parity and metrics.
 
-Standard library only; every step is a function that the tests feed with synthetic data.
+Package arguments may be raw packages or `aml/fetch_results.py show` output (whole or split). Standard library
+only; every step is a function that the tests feed with synthetic data.
 """
 import argparse
 import base64
@@ -18,22 +25,29 @@ import csv
 import hashlib
 import json
 import math
+import os
 import random
 import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PROTOCOL = HERE / "slo_protocol.json"
+REPORT = HERE.parent / "report.py"
+REPORT_KEY = "slo.package"
+CHUNK_CHARS = 4000  # report.py
+MAX_CHUNKS = 150  # per reported key (slo_protocol.json reporting)
+REPORT_FAILURES = ("AXK2_REPORT_WARN mlflow unavailable", "set_tags attempt 4 failed")  # report.py output
+TAIL_CHARS = 16384  # node1 server-log tail kept per two-server phase
 LN_105 = math.log(1.05)
 SANITIZE = ((re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<ip>"), (re.compile(r"/mnt/azureml/cr/j/[^/\s\"']+"), "<job>"))
 POINT_STATS = ("ttft_p50", "ttft_p90", "ttft_p99", "tpot_p50", "tpot_p90", "tpot_p99", "e2e_p50", "e2e_p90",
                "itl_p50", "itl_p99", "output_tok_s")
-CANDIDATES = (("slo-C2", "slo-A"), ("slo-D", "slo-A"), ("slo-C2s", "slo-A"), ("slo-C2s", "slo-C2"))
 
 
 def load_protocol(path=None):
@@ -45,6 +59,62 @@ def load_json(path):
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def resolve_layout(protocol, name):
+    """A layout with its `same_as` chain applied: overrides replace, extra_args append; `root` names the base."""
+    layout = dict(protocol["layouts"][name])
+    if "same_as" not in layout:
+        return {**layout, "root": name}
+    base = resolve_layout(protocol, layout.pop("same_as"))
+    extra = layout.pop("extra_args", [])
+    base.update(layout)
+    base["args"] = [*base["args"], *extra]
+    return base
+
+
+def phase_entry(protocol, phase):
+    """The protocol entry of a PHASE_PLAN token: an explicit phase, or <kind>-<layout> built from
+    phase_templates for a layout of the table (slo-sensitivity for a sensitivity layout; none for an
+    experimental layout)."""
+    if phase in protocol["phases"]:
+        return protocol["phases"][phase]
+    kind, _, name = phase.partition("-")
+    templates = protocol.get("phase_templates", {})
+    if isinstance(templates.get(kind), dict) and name in protocol["layouts"]:
+        layout = resolve_layout(protocol, name)
+        if not layout.get("experimental"):
+            entry = json.loads(json.dumps(templates["slo-sensitivity" if kind == "slo" and layout.get("sensitivity") else kind]))
+            entry["layout"] = name
+            if "label" in entry:
+                entry["label"] = entry["label"].format(layout=name)
+            return entry
+    raise ValueError(f"{phase} is not a phase of slo_protocol.json")
+
+
+def phase_suites(protocol, phase, round_=None):
+    """The client suites a phase runs: soak only in the soak round, realtext only for the checkpoints of W1real."""
+    entry = phase_entry(protocol, phase)
+    checkpoint = resolve_layout(protocol, entry["layout"])["checkpoint"]
+    return [s for s in entry["suites"] if (s != "soak" or round_ == protocol["rounds"]["soak_round"])
+            and (s != "realtext" or checkpoint in protocol["workloads"]["W1real"]["checkpoints"])]
+
+
+def ordered(layouts, round_):
+    """The round's order of the candidates: as listed in odd rounds, reversed in even rounds."""
+    return list(layouts) if int(round_) % 2 else list(layouts)[::-1]
+
+
+def sensitivity_of(protocol, name):
+    """<name>s when the layout table defines it as a sensitivity layout, else None."""
+    return f"{name}s" if protocol["layouts"].get(f"{name}s", {}).get("sensitivity") else None
+
+
+def rates_key(protocol, name):
+    """The name a layout's rate grid (SLO_RATES_<key>) and soak rate (SOAK_RATES <key>=...) are looked up under:
+    its own, except for A2 and the sensitivity layouts (same_rates), which use their base layout's."""
+    layout = protocol["layouts"][name]
+    return layout["same_as"] if layout.get("same_rates") else name
 
 
 def sanitize(value, hosts=()):
@@ -353,6 +423,8 @@ def compact_point(record, verify, protocol, telemetry, ib):
                                                    "request_goodput", "median_ttft_ms", "median_tpot_ms",
                                                    "median_itl_ms", "max_concurrent_requests")},
             "engine_peaks": record.get("per_engine_peaks"), "counters": (record.get("deltas") or {}).get("totals"),
+            "peaks": {"kv_cache_usage": record.get("peak_kv_cache_usage"),
+                      "running": record.get("peak_running_requests_sum_over_engines")},
             "gpu": gpus, "ib": {node: ib_window(samples, start, end) for node, samples in ib.items()},
             "requests": compact_rows(rows, window)}
 
@@ -381,33 +453,145 @@ def package(root, protocol=None):
     for point, record in zip(points, [r for r in records if r.get("record_type") == "bench_point"]):
         if point["workload"] == "soak":
             point["series"] = soak_series(verify / record["metrics_jsonl"], point["t_start_unix"])
-    plans = {}
+    plans, screens = {}, {}
     for path in sorted(verify.glob("*.json")):
-        found = re.match(r"(.+)\.(partr|slo|soak|realtext)\.json$", path.name)
+        found = re.match(r"(.+)\.(partr|slo|soak|realtext|screen)\.json$", path.name)
         data = load_json(path) if found else None
         if isinstance(data, dict):
             plans.setdefault(found.group(1), {})[found.group(2)] = {
                 "plan": data.get("plan", []), "aborted": data.get("aborted"), "skipped": data.get("skipped"),
                 "missing": data.get("missing", False)}
+            if found.group(2) == "screen":
+                screens[found.group(1)] = {k: data.get(k) for k in ("facts", "steps", "aborted", "suite_seconds")}
     raw = {}
     for path in sorted(verify.glob("parity-*.json")):
         data = load_json(path)
         if isinstance(data, dict) and data.get("record_type") == "parity":
             raw[(data["phase"], bool(data.get("long")))] = data
+    # Screening compares every launch with the job's first launch (scr-A, scr-D or scr-Dx1).
+    screen_reference = next((ref for ref in protocol.get("screen", {}).get("references", []) if (ref, False) in raw), None)
     parity = {}
     for (phase, long), data in raw.items():
-        reference = "diag-A" if phase.startswith("diag-") else "slo-A"
-        if phase != reference and (reference, long) in raw:
+        if phase.startswith("scr-"):
+            reference = screen_reference
+        else:
+            reference = "diag-A" if phase.startswith("diag-") else "slo-A"
+        if reference and phase != reference and (reference, long) in raw:
             parity[f"{phase}{'-long' if long else ''}"] = parity_compare(data, raw[(reference, long)])
     phases = [json.loads(line) for line in (root / "node0" / "phases.jsonl").read_text().splitlines()
               if line.strip()] if (root / "node0" / "phases.jsonl").exists() else []
     extra = {kind: {path.stem[len(kind) + 1:]: load_json(path) for path in sorted((root / "node0").glob(f"{kind}-*.json"))}
-             for kind in ("effective", "nccl", "lb-stats", "clean")}
+             for kind in ("effective", "nccl", "lb-stats", "clean", "start", "reclaim")}
+    # Tails of the second server's log (node1), pulled by node_tools.py pull for two-server phases.
+    tails = {path.name[len("tail-vllm-"):-len("-replica1.log")]: path.read_text(errors="replace")[-TAIL_CHARS:]
+             for node in nodes for path in sorted((root / node).glob("tail-vllm-*-replica1.log"))}
     rounds = sorted({p["round"] for p in points if p.get("round") is not None})
     return sanitize({"schema": "axk2-slo-package/1", "rounds": rounds, "phases": phases, "plans": plans,
-                     "points": points, "parity": parity,
+                     "points": points, "parity": parity, "screen_reference": screen_reference, "screens": screens,
+                     "protocol_plan": load_json(root / "node0" / "protocol-plan.json"), "replica_tails": tails,
                      "hosts_sha256": {node: hashlib.sha256((h or "").encode()).hexdigest()[:12] for node, h in zip(nodes, hosts)},
                      **{kind.replace("-", "_"): value for kind, value in extra.items()}}, hosts)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Reporting through the job record (report.py chunks, fetch_results.py show reads them back)
+
+def encode_report(data):
+    """The text report.py sends for one key: "z:" + base64(zlib(JSON)), what fetch_results.py decodes."""
+    return "z:" + base64.b64encode(zlib.compress(json.dumps(data, separators=(",", ":")).encode(), 9)).decode()
+
+
+def chunks(text):
+    return max(1, math.ceil(len(text) / CHUNK_CHARS))
+
+
+def split_package(data, max_chars=MAX_CHUNKS * CHUNK_CHARS):
+    """{report key: payload}. slo.package holds everything but the points and maps each part to its launch;
+    each slo.package.<launch> holds one launch's points, halved (<launch>-p1, -p2, ...) while its encoded text
+    is longer than max_chars. When even the index is too long, the effective configs lose their log lines."""
+    parts, launches = {}, {}
+    for point in data.get("points", []):
+        launches.setdefault(point["phase"], []).append(point)
+
+    def add(name, launch, points):
+        part = {"schema": "axk2-slo-package-part/1", "launch": launch, "points": points}
+        if len(points) > 1 and len(encode_report(part)) > max_chars:
+            half = len(points) // 2
+            add(f"{name}-p1", launch, points[:half])
+            add(f"{name}-p2", launch, points[half:])
+        else:
+            parts[name] = part
+
+    for launch, points in launches.items():
+        add(launch, launch, points)
+    index = {**{k: v for k, v in data.items() if k != "points"},
+             "parts": {name: part["launch"] for name, part in sorted(parts.items())}}
+    if len(encode_report(index)) > max_chars:
+        index["effective"] = {phase: {k: v for k, v in (value or {}).items() if k != "lines"}
+                              for phase, value in (index.get("effective") or {}).items()}
+        index["trimmed"] = ["effective.*.lines"]
+    return {REPORT_KEY: index, **{f"{REPORT_KEY}.{name}": part for name, part in sorted(parts.items())}}
+
+
+def merge_package(reports, key=REPORT_KEY):
+    """One package from what `fetch_results.py show` returns ("reports"): the whole package under key, or the
+    index under key plus the parts it names. Missing parts are listed with the launches they held (only those
+    launches lose their points), never silently ignored."""
+    index = reports.get(key) if isinstance(reports, dict) else None
+    if not isinstance(index, dict):
+        return None
+    if "parts" not in index:
+        return index
+    names = index["parts"] if isinstance(index["parts"], dict) else {name: name for name in index["parts"]}
+    points, missing, lost = [], [], set()
+    for name, launch in names.items():
+        part = reports.get(f"{key}.{name}")
+        if isinstance(part, dict):
+            points += part.get("points", [])
+        else:
+            missing.append(name)
+            lost.add(launch)
+    return {**{k: v for k, v in index.items() if k != "parts"}, "points": points, "missing_parts": missing,
+            "missing_launches": sorted(lost)}
+
+
+def report_package(data, state=None):
+    """Sends the split package through report.py (chunked MLflow tags): the parts first, the index last, so an
+    index never names a part that has not been sent. With a state file, only keys whose text changed since the
+    last call go out again. report.py always exits 0, so its output decides whether a key went out: no mlflow, a
+    failed fourth set_tags attempt or a reported exception means not sent. AXK2_REPORT_PKGS (the job's mlflow
+    packages) becomes the child's PYTHONPATH, as in verify_suites.emit."""
+    sent = (load_json(state) if state else None) or {}
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    if os.environ.get("AXK2_REPORT_PKGS"):
+        env["PYTHONPATH"] = os.environ["AXK2_REPORT_PKGS"]
+    folder = Path(state).parent if state else Path(tempfile.gettempdir())
+    folder.mkdir(parents=True, exist_ok=True)
+    summary = {}
+    for key, payload in sorted(split_package(data).items(), key=lambda item: item[0] == REPORT_KEY):
+        text = encode_report(payload)
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        summary[key] = {"chunks": chunks(text), "sent": False}
+        if sent.get(key) == digest:
+            continue
+        path = folder / "slo-package-report.txt"
+        path.write_text(text)
+        try:
+            run = subprocess.run([sys.executable, str(REPORT), key, "--file", str(path)], env=env, check=False,
+                                 timeout=300, capture_output=True, text=True)
+            output = f"{run.stdout or ''}\n{run.stderr or ''}"
+            warnings = [line for line in output.splitlines() if line.startswith("AXK2_REPORT_WARN")]
+            done = run.returncode == 0 and not any(marker in output for marker in REPORT_FAILURES) and \
+                not any(line.startswith(f"AXK2_REPORT_WARN {key}:") for line in warnings)
+        except subprocess.TimeoutExpired:
+            done, warnings = False, [f"AXK2_REPORT_WARN {key}: report.py timed out after 300 s"]
+        for line in warnings:
+            print(line[:300], flush=True)
+        summary[key]["sent"] = done
+        if done and state:
+            sent[key] = digest
+            Path(state).write_text(json.dumps(sent))
+    return summary
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -421,10 +605,12 @@ def lambda_star(points, threshold=0.9):
         return {"value": None, "bracketed": False, "reason": "fewer than two valid rates"}
     good = [i for i, p in enumerate(points) if p[1] is not None and p[1] >= threshold]
     if not good:
-        return {"value": None, "bracketed": False, "reason": "no rate meets the threshold: the grid starts too high"}
+        return {"value": None, "bracketed": False, "high": points[0][0],
+                "reason": "no rate meets the threshold: the grid starts too high"}
     i = good[-1]
     if i == len(points) - 1:
-        return {"value": None, "bracketed": False, "reason": "the highest rate still meets the threshold: the grid ends too low"}
+        return {"value": None, "bracketed": False, "low": points[-1][0],
+                "reason": "the highest rate still meets the threshold: the grid ends too low"}
     (r0, g0, o0, t0), (r1, g1, o1, t1) = points[i], points[i + 1]
     share = (g0 - threshold) / (g0 - g1)
     blend = lambda a, b: None if a is None or b is None else a + share * (b - a)
@@ -540,20 +726,41 @@ def launch_metrics(points, protocol, nodes, full_grid=True):
 
 
 def phase_nodes(protocol, phase):
-    entry = protocol["phases"].get(phase, {})
-    layout = protocol["layouts"].get(entry.get("layout"), {})
-    while "same_as" in layout and "nodes" not in layout:
-        layout = {**protocol["layouts"][layout["same_as"]], **{k: v for k, v in layout.items() if k != "same_as"}}
-    return layout.get("nodes", 1) * entry.get("replicas", 1)
+    """Nodes a phase occupies (cost): the layout's nodes x the phase's servers."""
+    try:
+        entry = phase_entry(protocol, phase)
+    except ValueError:
+        return 1
+    return resolve_layout(protocol, entry["layout"]).get("nodes", 1) * entry.get("replicas", 1)
 
 
-def expected_phases(protocol, round_):
-    rounds = protocol["rounds"]
-    return ["slo-A", *(f"slo-{n}" for n in rounds["middle_order"].get(str(round_), [])), "slo-A2"]
+def round_layouts(protocol, packages, round_):
+    """The candidates a round compared with A: recorded by protocol.sh (protocol-plan.json), else the default."""
+    for pkg in packages:
+        plan = pkg.get("protocol_plan") if package_round(pkg) == round_ else None
+        if isinstance(plan, dict) and plan.get("layouts"):
+            return list(plan["layouts"])
+    return list(protocol["rounds"]["layouts"])
+
+
+def comparison_pairs(protocol, layouts):
+    """(candidate, baseline): every candidate against A, then each sensitivity run against A and its layout."""
+    pairs = [(f"slo-{name}", "slo-A") for name in layouts]
+    for name in layouts:
+        if sensitivity_of(protocol, name):
+            pairs += [(f"slo-{sensitivity_of(protocol, name)}", "slo-A"), (f"slo-{sensitivity_of(protocol, name)}", f"slo-{name}")]
+    return pairs
+
+
+def expected_phases(protocol, round_, layouts=None):
+    return ["slo-A", *(f"slo-{n}" for n in ordered(layouts or protocol["rounds"]["layouts"], round_)), "slo-A2"]
 
 
 def full_grid(protocol, phase):
-    options = protocol["phases"].get(phase, {}).get("options", {}).get("slo", {})
+    try:
+        options = phase_entry(protocol, phase).get("options", {}).get("slo", {})
+    except ValueError:
+        return True
     return not any(name.endswith("_points") for name in options)
 
 
@@ -561,7 +768,7 @@ def package_round(pkg):
     return (pkg.get("rounds") or [None])[0]
 
 
-def round_validity(round_, package_list, chosen, protocol):
+def round_validity(round_, package_list, chosen, protocol, layouts=None):
     """A round counts only if every measuring suite of every comparison phase reported, none aborted, and every
     planned point has a valid attempt (in the soak round the soak included)."""
     plans = {}
@@ -569,10 +776,12 @@ def round_validity(round_, package_list, chosen, protocol):
         if package_round(pkg) == round_:
             plans.update(pkg.get("plans", {}))
     problems = []
-    for phase in expected_phases(protocol, round_):
+    lost = {launch for pkg in package_list if package_round(pkg) == round_ for launch in pkg.get("missing_launches") or []}
+    for phase in expected_phases(protocol, round_, layouts):
+        if phase in lost:
+            problems.append(f"{phase}: a part of the results package never arrived")
         suites = plans.get(phase, {})
-        required = [s for s in protocol["phases"][phase]["suites"] if s in ("partr", "slo", "realtext", "soak")
-                    and (s != "soak" or round_ == protocol["rounds"]["soak_round"])]
+        required = [s for s in phase_suites(protocol, phase, round_) if s in ("partr", "slo", "realtext", "soak")]
         for suite in required:
             plan = suites.get(suite)
             if plan is None:
@@ -653,7 +862,9 @@ def analyze(packages, protocol=None, resamples=None):
         launches.setdefault((round_, phase), []).append(point)
     metrics = {key: launch_metrics(group, protocol, phase_nodes(protocol, key[1]), full_grid(protocol, key[1]))
                for key, group in launches.items()}
-    validity = {r: round_validity(r, packages, chosen, protocol) for r in rounds}
+    layouts = {r: round_layouts(protocol, packages, r) for r in rounds}
+    candidates = list(dict.fromkeys(n for r in rounds for n in layouts[r])) or list(protocol["rounds"]["layouts"])
+    validity = {r: round_validity(r, packages, chosen, protocol, layouts[r]) for r in rounds}
     valid_rounds = [r for r in rounds if validity[r]["valid"]]
     series = lambda phase, metric: {r: metrics[(r, phase)][0].get(metric) for r in valid_rounds
                                     if (r, phase) in metrics and metrics[(r, phase)][0].get(metric) is not None}
@@ -668,7 +879,7 @@ def analyze(packages, protocol=None, resamples=None):
                                  "delta_min_log": delta_min_log(a, a2)}
     pooled = max([LN_105] + [n["delta_min_log"] for n in noise.values() if n["delta_min_log"]])
     comparisons = {}
-    for candidate, baseline in CANDIDATES:
+    for candidate, baseline in comparison_pairs(protocol, candidates):
         rows = {}
         for item in catalogue:
             x, a = series(candidate, item["id"]), series(baseline, item["id"])
@@ -691,7 +902,7 @@ def analyze(packages, protocol=None, resamples=None):
                if n["sd"] is not None and n["sd"] > extend["sd_ln_a2_over_a_max"]
                and any(m == p["id"] for p in protocol["metrics"]["primary"])]
     for name, rows in comparisons.items():
-        if name.endswith("slo-C2"):
+        if not name.endswith(" vs slo-A"):
             continue
         reasons += [f"{name}: 95% CI half-width of {m} is {math.exp(r['ci_half_width_log']) - 1:.1%}"
                     for m, r in rows.items() if r.get("primary") and r.get("ci_half_width_log")
@@ -701,11 +912,13 @@ def analyze(packages, protocol=None, resamples=None):
                  and len(valid_rounds) < extend["max_rounds"],
                  "evaluated": len(valid_rounds) >= extend["after_rounds"], "reasons": reasons}
     parity, acceptance = {}, {}
+    fp8 = [f"slo-{n}" for c in candidates for n in (c, sensitivity_of(protocol, c))
+           if n and resolve_layout(protocol, n)["checkpoint"] == "fp8"]
     for pkg in packages:
         for name, result in pkg.get("parity", {}).items():
             parity[f"round {package_round(pkg)} {name}"] = result
         floor = pkg.get("parity", {}).get("slo-A2")
-        for phase in ("slo-C2", "slo-C2s"):
+        for phase in fp8:
             if phase in pkg.get("parity", {}):
                 acceptance[f"round {package_round(pkg)} {phase}"] = parity_acceptance(pkg["parity"][phase], floor)
     soak = {f"round {p['round']} {p['phase']}": soak_check(p, protocol["workloads"]["soak"]["pass"])
@@ -714,19 +927,22 @@ def analyze(packages, protocol=None, resamples=None):
     grid = {}
     for workload in ("W1", "W2"):
         per_phase = {}
-        for phase in ("slo-A", "slo-C2", "slo-D"):
+        for phase in ("slo-A", *(f"slo-{n}" for n in candidates)):
             values = [metrics[(r, phase)][0].get(f"lambda_star.{workload}.standard") for r in valid_rounds
                       if (r, phase) in metrics]
             per_phase[phase] = mean(values) if values else None
         grid[workload] = suggest_grid(per_phase)
     dx = {}
-    for key in {k for k in metrics if k[1] in ("dx1-D", "dx2-D")}:
-        dx.setdefault(key[0], {})[key[1]] = metrics[key][0]
+    for (round_, phase), (values, _, _) in metrics.items():
+        kind, _, layout = phase.partition("-")
+        if kind in ("dx1", "dx2"):
+            dx.setdefault((round_, layout), {})[kind] = values
     scaling = {}
-    for round_, launch in dx.items():
+    for (round_, layout), launch in sorted(dx.items()):
         for workload in ("W1", "W2"):
-            one, two = (launch.get(p, {}).get(f"lambda_star.{workload}.standard") for p in ("dx1-D", "dx2-D"))
-            scaling[f"round {round_} {workload}"] = {
+            one, two = (launch.get(kind, {}).get(f"lambda_star.{workload}.standard") for kind in ("dx1", "dx2"))
+            name = f"round {round_} {workload}" if layout == "D" else f"round {round_} {layout} {workload}"
+            scaling[name] = {
                 "lambda_dx1": one, "lambda_dx2": two, "ratio": two / one if one and two else None,
                 "passed": bool(one and two and two >= protocol["dx2"]["pass_ratio"] * one)}
     diagnostics = []
@@ -744,6 +960,7 @@ def analyze(packages, protocol=None, resamples=None):
     invalid = [{"round": p["round"], "phase": p["phase"], "point": p["name"], "attempt": p["attempt"],
                 "reasons": p["invalid_reasons"]} for p in points if not p["valid"]]
     return {"schema": "axk2-slo-evidence/1", "protocol_status": protocol["status"], "rounds": rounds,
+            "round_layouts": {str(r): layouts[r] for r in rounds},
             "round_validity": validity, "valid_rounds": valid_rounds, "a2_noise": noise,
             "pooled_delta_min_log": pooled, "comparisons": comparisons, "extension": extension,
             "lambda_star": lambda_table, "next_grid": grid, "parity": parity, "parity_acceptance": acceptance,
@@ -752,6 +969,199 @@ def analyze(packages, protocol=None, resamples=None):
             "launch_metrics": {f"round {r} {ph}": m for (r, ph), (m, _, _) in sorted(metrics.items())},
             "prices_usd_per_node_hour": protocol["prices_usd_per_node_hour"],
             "slo_assumption": protocol["slo"]["assumption"]}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Screening: per-launch facts and the pre-registered selection of the round candidates
+
+def point_peaks(point):
+    """Peak KV usage (largest engine) and peak of running requests (summed over engines) during a point."""
+    peaks, engines = point.get("peaks") or {}, (point.get("engine_peaks") or {}).values()
+    kv = peaks.get("kv_cache_usage")
+    running = peaks.get("running")
+    if kv is None and engines:
+        kv = max(e.get("kv_cache_usage_perc", 0) for e in engines)
+    if running is None and engines:
+        running = sum(e.get("num_requests_running", 0) for e in engines)
+    return {"peak_kv_cache_usage": kv, "peak_running": running}
+
+
+def screen_launches(packages, protocol):
+    """Per screening launch (scr-*): phase result, start record, effective config, screen facts and steps,
+    parity against the job's reference, metrics of its valid points (with flags, peaks and lambda*)."""
+    launches = {}
+    for pkg in packages:
+        points = [p for p in pkg.get("points", []) if str(p.get("phase", "")).startswith("scr-")]
+        groups = {}
+        for (_, phase, _), point in best_attempts(points).items():
+            groups.setdefault(phase, []).append(point)
+        results = {p["phase"]: p for p in pkg.get("phases", []) if str(p.get("phase", "")).startswith("scr-")}
+        for phase in dict.fromkeys([*results, *groups]):
+            metrics, flags, lambdas = launch_metrics(groups.get(phase, []), protocol, phase_nodes(protocol, phase))
+            effective, result = (pkg.get("effective") or {}).get(phase) or {}, results.get(phase) or {}
+            kv = effective.get("kv_tokens") or []
+            launches[phase] = {
+                "status": result.get("status"), "note": result.get("note"), "seconds": result.get("seconds"),
+                "start": (pkg.get("start") or {}).get(phase), "max_model_len": effective.get("max_model_len"),
+                "kv_tokens": kv, "kv_tokens_total": sum(kv) if kv else None, "problems": effective.get("problems"),
+                "screen": (pkg.get("screens") or {}).get(phase), "parity": (pkg.get("parity") or {}).get(phase),
+                "reference": pkg.get("screen_reference"), "metrics": metrics, "flags": flags, "lambda": lambdas,
+                "peaks": {p["id"]: point_peaks(p) for p in groups.get(phase, []) if p["valid"]},
+                "invalid_points": sorted({p["id"] for p in groups.get(phase, []) if not p["valid"]}),
+                "reclaim": (pkg.get("reclaim") or {}).get(phase),
+                "missing_part": phase in (pkg.get("missing_launches") or [])}
+    return launches
+
+
+def screen_parity_problems(parity, limits):
+    if not parity or parity.get("mean_abs_logprob_diff") is None or parity.get("top1_agreement") is None:
+        return ["no short parity against the job's reference"]
+    problems = []
+    if parity["mean_abs_logprob_diff"] > limits["mean_abs_logprob_diff_max"]:
+        problems.append(f"mean |d logprob| {parity['mean_abs_logprob_diff']:.4f} > {limits['mean_abs_logprob_diff_max']}")
+    if parity["top1_agreement"] < limits["top1_agreement_min"]:
+        problems.append(f"top-1 agreement {parity['top1_agreement']:.4f} < {limits['top1_agreement_min']}")
+    if (parity.get("greedy_diverged_before_16") or 0) > limits["greedy_diverged_before_16_max"]:
+        problems.append(f"{parity['greedy_diverged_before_16']} greedy prompts diverged before token 16")
+    return problems
+
+
+def screen_eligibility(phase, launch, reference, rule, protocol):
+    """Reasons a screened launch cannot join the rounds (slo_protocol.json screen.selection.eligible)."""
+    if launch is None:
+        return ["not screened"]
+    problems = []
+    if launch["status"] != "passed":
+        problems.append(f"phase {launch['status'] or 'not finished'}" + (f": {launch['note']}" if launch.get("note") else ""))
+    fallback = (launch.get("start") or {}).get("length_fallback")
+    if fallback:
+        problems.append(f"could not hold --max-model-len {fallback.get('requested')} (relaunched with -1)")
+    if launch.get("missing_part"):
+        problems.append("a part of the results package never arrived")
+    if phase != rule["reference"]:
+        problems += [f"parity: {p}" for p in screen_parity_problems(launch.get("parity"), protocol["screen"]["parity"]["pass"])]
+    if rule["rank_by"] not in launch["metrics"]:
+        problems.append(f"{rule['rank_by']} missing (point not run or invalid)")
+    for metric in rule["tpot"]:
+        value, base = launch["metrics"].get(metric), ((reference or {}).get("metrics") or {}).get(metric)
+        if value is None or base is None:
+            problems.append(f"{metric} missing ({'reference' if value is not None else 'this launch'})")
+        elif value > rule["tpot_max_ratio"] * base:
+            problems.append(f"{metric} is {value / base:.2f} x the reference's (limit {rule['tpot_max_ratio']})")
+    return problems
+
+
+def capacity_bounds(result):
+    """(low, high) of lambda*: equal when bracketed, one bound when the ladder missed it, (None, None) if unknown."""
+    if not result:
+        return None, None
+    if result.get("value") is not None:
+        return result["value"], result["value"]
+    return result.get("low"), result.get("high")
+
+
+def dx2_decision(x, base, ratio):
+    """pass when lambda*(x) >= ratio x lambda*(base) for every value the bounds allow, fail when it cannot be,
+    otherwise undecided."""
+    x_low, x_high = capacity_bounds(x)
+    b_low, b_high = capacity_bounds(base)
+    if x_low is not None and b_high is not None and x_low >= ratio * b_high:
+        return "pass"
+    if x_high is not None and b_low is not None and x_high < ratio * b_low:
+        return "fail"
+    return "undecided"
+
+
+def select(packages, protocol=None):
+    """The pre-registered selection of the round candidates from the screening packages."""
+    protocol = protocol or load_protocol()
+    rules = protocol["screen"]["selection"]
+    launches = screen_launches(packages, protocol)
+    out = {"schema": "axk2-screen-selection/1", "protocol_status": protocol["status"], "rule": rules["rule"],
+           "always": rules["always"], "families": {}}
+    chosen = []
+    for family in ("fp8", "nvfp4"):
+        rule = rules[family]
+        reference = launches.get(rule["reference"])
+        candidates = {}
+        for phase in rule["phases"]:
+            problems = screen_eligibility(phase, launches.get(phase), reference, rule, protocol)
+            if reference is None or reference["status"] != "passed":
+                problems.insert(0, f"the reference {rule['reference']} did not pass")
+            launch, point = launches.get(phase) or {}, rule["rank_by"].rsplit(".", 1)[0]
+            candidates[phase] = {"layout": phase_entry(protocol, phase)["layout"], "eligible": not problems,
+                                 "value": launch.get("metrics", {}).get(rule["rank_by"]), "problems": problems,
+                                 "ranking_point": {"flags": (launch.get("flags") or {}).get(point, []),
+                                                   **(launch.get("peaks") or {}).get(point, {})}}
+        ranking = sorted((p for p, c in candidates.items() if c["eligible"]),
+                         key=lambda p: (-candidates[p]["value"], rule["phases"].index(p)))
+        choice = candidates[ranking[0]]["layout"] if ranking else None
+        out["families"][family] = {"reference": rule["reference"], "rank_by": rule["rank_by"], "ranking": ranking,
+                                   "choice": choice, "candidates": candidates}
+        if choice:
+            chosen.append(choice)
+    dx = rules["dx2"]
+    key = dx["metric"].split(".", 1)[1]
+    x, base = ((launches.get(p) or {}).get("lambda", {}).get(key) for p in (dx["x"], dx["base"]))
+    decision = dx2_decision(x, base, dx["ratio_min"])
+    out["dx2"] = {"decision": decision, "lambda_dx2": x, "lambda_dx1": base, "ratio_min": dx["ratio_min"],
+                  "ratio": x["value"] / base["value"] if x and base and x.get("value") and base.get("value") else None,
+                  "run_dx2_job": decision != "fail", "note": dx["unbracketed"]}
+    pd = launches.get("scr-PD")
+    out["pd"] = None if pd is None else {
+        "status": pd["status"], "note": pd["note"], "lambda_w1_standard": pd["lambda"].get("W1.standard"),
+        "parity": pd["parity"], "invalid_points": pd["invalid_points"], "selected": False, "rule": rules["pd"]}
+    sensitivity = sensitivity_of(protocol, chosen[0]) if chosen and resolve_layout(protocol, chosen[0])["checkpoint"] == "fp8" else None
+    keys = [rates_key(protocol, name) for name in ["A", *chosen]]
+    out.update(round_layouts=",".join(chosen), sensitivity=sensitivity,
+               submit=f"--set environment_variables.ROUND_LAYOUTS={','.join(chosen)}" if chosen else None,
+               rates={"slo_rates_env": [f"SLO_RATES_{key}" for key in keys], "soak_rates_keys": keys,
+                      "soak_rates": "SOAK_RATES=" + ",".join(f"{key}=<req/s>" for key in keys),
+                      "note": "the round-3 soak looks these keys up (A2 and the sensitivity runs use their base layout's)"},
+               pairs=[{"name": pair["name"], "x": pair["x"], "base": pair["base"],
+                       "ratios": {m: launches[pair["x"]]["metrics"].get(m) / launches[pair["base"]]["metrics"][m]
+                                  for m in pair["metrics"] if pair["x"] in launches and pair["base"] in launches
+                                  and launches[pair["x"]]["metrics"].get(m) is not None
+                                  and launches[pair["base"]]["metrics"].get(m)},
+                       "note": "one launch each: an indication, not a statistically established difference"}
+                      for pair in protocol["screen"]["pairs"]],
+               launches=launches)
+    return out
+
+
+def selection_markdown(selection):
+    rows = ["# Screening and selection", "", f"- Rule: {selection['rule']}",
+            f"- Round candidates: A + {selection['round_layouts'] or '(none eligible)'}"
+            + (f"; round 1 adds {selection['sensitivity']}" if selection.get("sensitivity") else ""),
+            f"- Submit the rounds with: `{selection['submit']}`" if selection.get("submit") else "- No candidate is eligible.",
+            f"- D x 2: {selection['dx2']['decision']} (ratio {fmt(selection['dx2']['ratio'])}, minimum "
+            f"{selection['dx2']['ratio_min']}); run slo-nvfp4-2replica-nd96.yml: {selection['dx2']['run_dx2_job']}",
+            f"- Rate keys of the rounds: {', '.join(selection['rates']['slo_rates_env'])}; {selection['rates']['soak_rates']}", "",
+            "| launch | status | max_model_len | KV tokens per engine (engines, total) | s to healthy | parity mean abs / top-1 | "
+            "c1 TPOT 1K / 8K ms | c32 8K tok/s | W1 lambda* | invalid points |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for phase, launch in selection["launches"].items():
+        start, parity, metrics = launch.get("start") or {}, launch.get("parity") or {}, launch["metrics"]
+        kv = launch.get("kv_tokens") or []
+        rows.append(f"| {phase} | {launch['status']} | {fmt(launch.get('max_model_len'))}"
+                    f"{' (fallback)' if start.get('length_fallback') else ''} | "
+                    f"{(f'{min(kv):,}-{max(kv):,} ({len(kv)}, {sum(kv):,})' if kv else '-')} | {fmt(start.get('seconds_to_healthy'))} | "
+                    f"{fmt(parity.get('mean_abs_logprob_diff'), 4)} / {fmt(parity.get('top1_agreement'), 4)} | "
+                    f"{fmt(metrics.get('R/isl1024-c1.tpot_p50'), 1)} / {fmt(metrics.get('R/isl8192-c1.tpot_p50'), 1)} | "
+                    f"{fmt(metrics.get('R/isl8192-c32.output_tok_s'), 1)} | {fmt(metrics.get('lambda_star.W1.standard'))} | "
+                    f"{', '.join(launch['invalid_points']) or '-'} |")
+    for family, result in selection["families"].items():
+        rows += ["", f"## {family}: {result['choice'] or 'no eligible layout'} (by {result['rank_by']})", ""]
+        rows += [f"- {phase}: {'eligible' if c['eligible'] else 'excluded'}, {fmt(c['value'], 1)}"
+                 + (f" [{', '.join(c['ranking_point']['flags'])}; peak KV {fmt(c['ranking_point'].get('peak_kv_cache_usage'))}, "
+                    f"peak running {fmt(c['ranking_point'].get('peak_running'))}]" if c["ranking_point"]["flags"] else "")
+                 + ("" if c["eligible"] else " - " + "; ".join(c["problems"])) for phase, c in result["candidates"].items()]
+    rows += ["", "## Indications (one launch each)", ""]
+    rows += [f"- {pair['name']}: " + (", ".join(f"{m} x{v:.3f}" for m, v in pair["ratios"].items()) or "-")
+             for pair in selection["pairs"]]
+    if selection.get("pd"):
+        rows += ["", f"PD (experimental, never selected): {selection['pd']['status']}"
+                 + (f" - {selection['pd']['note']}" if selection["pd"].get("note") else "")]
+    return "\n".join(rows) + "\n"
 
 
 def fmt(value, digits=3):
@@ -793,27 +1203,38 @@ def markdown(evidence):
     return "\n".join(lines)
 
 
-def report_package(data, key="slo.package"):
-    """Sends the package through the job record (report.py), compressed like fetch_results.py expects."""
-    text = "z:" + base64.b64encode(zlib.compress(json.dumps(data, separators=(",", ":")).encode(), 9)).decode()
-    path = Path("/tmp/axk2-slo-package.txt")
-    path.write_text(text)
-    subprocess.run([sys.executable, str(HERE.parent / "report.py"), key, "--file", str(path)], check=False)
+def read_packages(paths):
+    """Packages from files: raw packages, lists of them, or `aml/fetch_results.py show` output whose "reports"
+    hold the package whole (slo.package) or split (slo.package + slo.package.<part>)."""
+    packages = []
+    for path in paths:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            packages += data
+            continue
+        data = data.get("reports", data)
+        packages.append(merge_package(data) or data)
+    return packages
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="bench_stats.py")
     commands = parser.add_subparsers(dest="command", required=True)
-    pack = commands.add_parser("package", help="compact package of one job's outputs (run inside the workspace)")
+    pack = commands.add_parser("package", help="compact package of one job's outputs (in the job or the workspace)")
     pack.add_argument("root")
     pack.add_argument("--out")
-    pack.add_argument("--report", action="store_true", help="also send it through the job record")
+    pack.add_argument("--report", action="store_true", help="also send it through the job record (report.py)")
+    pack.add_argument("--state", help="with --report: send only the keys that changed since the last call")
     study = commands.add_parser("analyze", help="statistics over the packages of every round")
     study.add_argument("packages", nargs="+")
     study.add_argument("--out", required=True)
     study.add_argument("--md")
     study.add_argument("--resamples", type=int, help="bootstrap resamples (0 skips the bootstrap)")
-    for sub in (pack, study):
+    choose = commands.add_parser("select", help="round candidates from the screening packages")
+    choose.add_argument("packages", nargs="+")
+    choose.add_argument("--out", required=True)
+    choose.add_argument("--md")
+    for sub in (pack, study, choose):
         sub.add_argument("--protocol", default=str(PROTOCOL))
     args = parser.parse_args(argv)
     protocol = load_protocol(args.protocol)
@@ -821,18 +1242,22 @@ def main(argv=None):
         data = package(args.root, protocol)
         if args.out:
             Path(args.out).write_text(json.dumps(data))
-        if args.report:
-            report_package(data)
-        print(json.dumps({"points": len(data["points"]), "rounds": data["rounds"], "parity": sorted(data["parity"])}))
+        keys = report_package(data, args.state) if args.report else {
+            key: {"chunks": chunks(encode_report(value))} for key, value in split_package(data).items()}
+        print(json.dumps({"points": len(data["points"]), "rounds": data["rounds"], "parity": sorted(data["parity"]),
+                          "keys": keys}))
         return 0
-    packages = []
-    for path in args.packages:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            packages += data
-            continue
-        data = data.get("reports", data)  # `aml/fetch_results.py show <collect job>` nests the tags here
-        packages.append(data.get("slo.package", data))
+    packages = read_packages(args.packages)
+    if args.command == "select":
+        selection = select(packages, protocol)
+        Path(args.out).write_text(json.dumps(selection, indent=1), encoding="utf-8")
+        if args.md:
+            Path(args.md).write_text(selection_markdown(selection), encoding="utf-8")
+        print(json.dumps({"round_layouts": selection["round_layouts"], "sensitivity": selection["sensitivity"],
+                          "dx2": selection["dx2"]["decision"], "submit": selection["submit"],
+                          "slo_rates_env": selection["rates"]["slo_rates_env"],
+                          "soak_rates": selection["rates"]["soak_rates"]}))
+        return 0
     evidence = analyze(packages, protocol, args.resamples)
     Path(args.out).write_text(json.dumps(evidence, indent=1), encoding="utf-8")
     if args.md:
