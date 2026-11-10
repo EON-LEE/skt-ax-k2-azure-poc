@@ -200,6 +200,8 @@ PD는 실험 단계다. 실패하면 "experimental phase:"로 시작하는 기�
 - 추정: 이미지와 이 하네스는 두 값을 설정하지 않는다. 따라서 Azure ML 작업 런타임이 넣은 값으로 본다.
 - 원인: `UCX_TLS=tcp`에는 `cuda_copy`가 빠져 있다. 그래서 UCX가 VRAM을 호스트 메모리로 분류했다. 첫 진단의 가설 중 "UCX가 CUDA 지원을 쓰지 못한다"에 해당한다. `UCX_MEMTYPE_CACHE=n`으로도 실패했으므로 메모리 종류 캐시는 원인이 아니다. 길이 0 서술자 가설은 이 결과로 배제되지 않는다. 대책을 적용한 뒤에도 실패하면 디버그 재기동(아래 4번)이 확인한다.
 - 대책: 두 서버에 `UCX_TLS=all`과 `UCX_NET_DEVICES=all`을 준다. vLLM의 `docs/features/nixl_connector_usage.md`가 권장하는 값이다. 전송 종류를 제한하는 `UCX_TLS` 목록은 쓰지 않는다. 제한 목록은 InfiniBand나 CUDA 전송을 뺄 수 있다.
+- 측정(두 번째 PD 재실행, main b7760b0): `UCX_TLS=all`, `UCX_NET_DEVICES=all`로 두 노드의 사전 점검을 통과했다. 두 서버가 기동했고(서버마다 KV 233,152 토큰), 디코드 서버가 "NIXL compatibility check passed"를 기록했으며, 프록시를 거친 확인 요청도 통과했다. 그다음 첫 출력 동등성 요청(프롬프트 log-prob)에서 프리필 서버가 `sample_tokens`의 GPU 메모리 부족으로 멈췄다. 1.25 GiB를 할당하려 했지만 1.06 GiB만 비어 있었고, 다른 프로세스가 그 GPU에서 486 MiB를 쓰고 있었다. PD가 아닌 D에는 이 프로세스가 없다.
+- 대책: PD만 `--gpu-memory-utilization`을 공통값 0.9 대신 0.85로 띄운다(`slo_protocol.json`의 PD 배치). PD의 KV 용량은 측정값으로 보고한다.
 
 PD 재실행 작업(`serving-screen-nvfp4-pd-nd96.yml`)의 PD 단계는 다음 순서로 실행한다.
 
