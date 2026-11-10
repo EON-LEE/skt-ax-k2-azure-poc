@@ -254,8 +254,9 @@ sys.exit(0 if result["gate"]["passed"] else 1)
 EOF
 }
 
-# bench_replica start <tag> <json args> <json env> | stop: dx2-D's second D server on node1, owned by a detached
-# Ray actor (own session; the whole group is stopped). `start` prints node1's address.
+# bench_replica start <tag> <json args> <json env> | alive | stop: the server process of node1 (dx2-D's second D server,
+# PD's decode server, an mp-multinode layout's headless DP engines), owned by a detached Ray actor (own session; the
+# whole group is stopped). `start` prints node1's address; `alive` exits 1 once the process has exited.
 bench_replica() {
   python3 - "$PWD/outputs" "$NODE_IP" "$@" <<'EOF'
 import json, sys
@@ -274,9 +275,15 @@ class Replica:
         ip = ray.util.get_node_ip_address()  # "@node_ip" values (e.g. VLLM_NIXL_SIDE_CHANNEL_HOST) are this node's
         env = {**os.environ, **{k: ip if v == "@node_ip" else v for k, v in env.items()},
                "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(count)))}
-        self.proc = subprocess.Popen(["vllm", "serve", model, *args], stdout=open(os.path.join(out, f"vllm-{tag}.log"), "w"),
-                                     stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        log = open(os.path.join(out, f"vllm-{tag}.log"), "a")
+        log.write(f"=== axk2 replica start {tag} ===\n")
+        log.flush()
+        self.proc = subprocess.Popen(["vllm", "serve", model, *args], stdout=log, stderr=subprocess.STDOUT, env=env,
+                                     start_new_session=True)
         return self.proc.pid
+
+    def alive(self):
+        return self.proc.poll() is None
 
     def stop(self):
         import os, signal, subprocess
@@ -299,6 +306,10 @@ if action == "start":
                             resources={f"node:{ip}": 0.001}).remote()
     ray.get(actor.start.remote(tag, args, env, root), timeout=300)
     print(ip)
+elif action == "alive":
+    alive = ray.get(ray.get_actor("replica").alive.remote(), timeout=60)
+    print(json.dumps({"alive": alive}))
+    sys.exit(0 if alive else 1)
 else:
     actor = ray.get_actor("replica")
     print(json.dumps({"returncode": ray.get(actor.stop.remote(), timeout=300)}))
@@ -316,24 +327,33 @@ bench_wait_url() {  # <url> <seconds>
   done
 }
 
+bench_has_peer() {  # does node1 run a process of this phase (a second server or headless DP engines)?
+  [ "${SPEC_REPLICAS:-1}" -gt 1 ] || [ "${SPEC_LAUNCHER:-}" = mp-multinode ]
+}
+
 # bench_launch <name> <model>: the phase's server on node0 in its own session and, for a two-server phase, the
-# peer server on node1 (bench_replica, SPEC_PEER_ARGS); waits for both. Sets SERVER_PID and peer; on a failure
-# sets note and returns 1. Every SPEC_NODE_ENV variable is the address of the node its server runs on.
+# peer server on node1 (bench_replica, SPEC_PEER_ARGS); waits for both. An mp-multinode phase starts node1's
+# headless DP engines right after node0 and waits for node0's /health only (bench_wait_head). Sets SERVER_PID and
+# peer; on a failure sets note and returns 1. Every SPEC_NODE_ENV variable is the address of the node its server
+# runs on; @head_ip in the arguments of either node is node0's address.
 bench_launch() {
-  local name=$1 model=$2 var
-  local -a node_env=() peer_env=()
+  local name=$1 model=$2 var what="the second server"
+  local -a node_env=() peer_env=() args=("${SPEC_ARGS[@]//@head_ip/${NODE_IP:-}}")
   for var in "${SPEC_NODE_ENV[@]}"; do node_env+=("$var=${NODE_IP:-}"); peer_env+=("$var=@node_ip"); done
-  log "vllm serve [$name] $model ${SPEC_ARGS[*]} (${SPEC_ENV[*]} ${node_env[*]})"
+  [ "${SPEC_LAUNCHER:-}" = mp-multinode ] && what="the headless DP engines"
+  log "vllm serve [$name] $model ${args[*]} (${SPEC_ENV[*]} ${node_env[*]})"
   env "${SPEC_ENV[@]}" "${node_env[@]}" VLLM_ENGINE_READY_TIMEOUT_S="$FULL_HEALTH_TIMEOUT" \
-    setsid vllm serve "$model" "${SPEC_ARGS[@]}" > "$OUT/vllm-$name.log" 2>&1 &
+    setsid vllm serve "$model" "${args[@]}" > "$OUT/vllm-$name.log" 2>&1 &
   SERVER_PID=$!
   peer=""
-  if [ "$SPEC_REPLICAS" -gt 1 ]; then
-    peer=$(bench_replica start "$name-replica1" "$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${SPEC_PEER_ARGS[@]}")" \
+  if bench_has_peer; then
+    peer=$(bench_replica start "$name-replica1" \
+           "$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${SPEC_PEER_ARGS[@]//@head_ip/${NODE_IP:-}}")" \
            "$(python3 -c 'import json, sys; print(json.dumps(dict(a.split("=", 1) for a in sys.argv[1:])))' "${SPEC_ENV[@]}" \
               "${peer_env[@]}" "VLLM_ENGINE_READY_TIMEOUT_S=$FULL_HEALTH_TIMEOUT")" | tail -n 1)
-    [[ "$peer" =~ ^[0-9.]+$ ]] || { peer=""; note="the second server could not be started on node1"; return 1; }
+    [[ "$peer" =~ ^[0-9.]+$ ]] || { peer=""; note="$what could not be started on node1"; return 1; }
   fi
+  [ "${SPEC_LAUNCHER:-}" = mp-multinode ] && { bench_wait_head "$name"; return; }
   if ! wait_healthy "$name" "$FULL_HEALTH_TIMEOUT"; then
     note="the server never became healthy (no --enforce-eager retry in a comparison phase)"
     return 1
@@ -378,17 +398,78 @@ bench_peer_tail() {  # <tag>: the tail of node1's second-server log, for failure
   timeout 120 python3 "$BENCH/node_tools.py" tail "$PWD/outputs" "${NODE_IP:-}" "vllm-$1-replica1.log" 2>/dev/null | tail -c 16384
 }
 
+# bench_wait_head <tag>: node0's /health in an mp-multinode phase. Node0's API server answers only once every DP
+# engine of both nodes has connected (the head waits for them without a time limit), so this covers node1. The
+# wait ends early when node0's server exits or node1's process does (checked every sixth poll).
+bench_wait_head() {
+  local tag=$1 began polls=0
+  began=$(date +%s)
+  until bench_url_ok http://127.0.0.1:8000/health; do
+    bench_alive "$SERVER_PID" || { note="the server on node0 exited before it became healthy"; return 1; }
+    polls=$((polls + 1))
+    if [ $((polls % 6)) = 0 ] && ! bench_replica alive > /dev/null 2>&1; then
+      note="the headless DP engines on node1 exited before node0 became healthy"
+      return 1
+    fi
+    if [ $(( $(date +%s) - began )) -gt "$FULL_HEALTH_TIMEOUT" ]; then
+      note="the server never became healthy (no --enforce-eager retry in a comparison phase)"
+      return 1
+    fi
+    sleep "${BENCH_POLL_SECONDS:-10}"
+  done
+  echo $(( $(date +%s) - began )) > "$OUT/startup-$tag.seconds"
+  log "[$tag] healthy after $(cat "$OUT/startup-$tag.seconds")s, with the DP engines of both nodes"
+}
+
+# bench_kv_short <tag>: vLLM's error lines for a server that cannot hold --max-model-len, from node0's log and,
+# when node1 runs a process of the phase, from node1's log tail (an mp-multinode layout's engines on either node).
+bench_kv_short() {
+  { grep -h "larger than the available KV cache memory" "$OUT/vllm-$1.log" 2>/dev/null
+    bench_has_peer && bench_peer_tail "$1" | grep "larger than the available KV cache memory"; } | head -n 4
+}
+
+# bench_peer_facts <tag>: KV cache sizes and DP rank lines of node1's process from its log of this phase (Ray grep,
+# not the tail): node0's log never shows node1's engines when they are not Ray workers. For the package.
+bench_peer_facts() {
+  timeout 120 python3 "$BENCH/node_tools.py" facts "$OUT/peer-$1.json" "$PWD/outputs" "${NODE_IP:-}" \
+    "vllm-$1-replica1.log" > /dev/null 2>&1
+  return 0
+}
+
+# bench_preflight <tag>: nixl_preflight.py on node0 and node1 (a Ray task pinned there), with the defaults and with
+# UCX_MEMTYPE_CACHE=n, each run limited to 120 s; $OUT/preflight-<tag>.json, reported. Prints the PD servers'
+# environment: "default", "UCX_MEMTYPE_CACHE=n", or "none: <reason>" when neither passes on both nodes.
+bench_preflight() {
+  timeout 600 python3 "$BENCH/node_tools.py" preflight "$OUT/preflight-$1.json" "${NODE_IP:-}" "$BENCH/nixl_preflight.py" \
+    --timeout 120 2>/dev/null | tail -n 1
+  [ -f "$OUT/preflight-$1.json" ] && report "node0.$1.preflight" --file "$OUT/preflight-$1.json" >&2
+  return 0
+}
+
+bench_vram_host() {  # <tag>: did UCX type a VRAM registration as host memory in either PD server's log?
+  { cat "$OUT/vllm-$1.log" 2>/dev/null; bench_peer_tail "$1"; } | grep -q "VRAM memory is detected as host"
+}
+
+# bench_pd_descs <tag>: vLLM NixlConnector's "Registering descs" lines (debug level) of both PD servers, with every
+# zero-length descriptor counted, into $OUT/descs-<tag>.json (the failure report's head). Prints a one-line summary.
+bench_pd_descs() {
+  timeout 180 python3 "$BENCH/node_tools.py" descs "$OUT/descs-$1.json" "$PWD/outputs" "${NODE_IP:-}" "$1" 2>/dev/null |
+    tail -n 1
+}
+
 # protocol_phase <name>: one protocol phase: settings from slo_suites.py phase-spec, a strict start, the
 # effective-config and NCCL gates, the client suites of the phase, then a full stop and a clean-state record.
-# A screening phase whose server cannot hold the common --max-model-len is relaunched once with -1, and a node set
+# A screening phase whose server cannot hold the common --max-model-len is relaunched once with -1 (both nodes of an
+# mp-multinode layout, whose KV-capacity error may come from either node), and a node set
 # that is not clean before the start is reclaimed once; both are recorded as events of the phase. An experimental
-# phase (PD) must pass a smoke request through its proxy, and its client runs under a time limit.
+# phase (PD) starts only after NIXL's VRAM preflight passes on both nodes, gets one debug relaunch when UCX still
+# types its KV cache as host memory, must pass a smoke request through its proxy, and its client runs under a limit.
 protocol_phase() {
   local name=$1 began spec model len rc commit base=http://127.0.0.1:8000 peer="" lb="" note="" rates_var
-  local fallback=null fitted requested i events="" smoke reason reclaimed
+  local fallback=null fitted requested i events="" smoke reason reclaimed short="" pd_env="" debug
   local -a limit=()
   local SPEC_LABEL SPEC_LAYOUT SPEC_RATES_KEY SPEC_CHECKPOINT SPEC_NODES SPEC_REPLICAS SPEC_LEN SPEC_SEQS SPEC_MEM
-  local SPEC_BATCHED SPEC_SUITES SPEC_OPTIONS SPEC_PROXY SPEC_EXPERIMENTAL SPEC_FALLBACK
+  local SPEC_BATCHED SPEC_SUITES SPEC_OPTIONS SPEC_PROXY SPEC_LAUNCHER SPEC_EXPERIMENTAL SPEC_FALLBACK
   local -a SPEC_ARGS=() SPEC_PEER_ARGS=() SPEC_ENV=() SPEC_NODE_ENV=()
   began=$(date +%s)
   spec=$(python3 "$BENCH/slo_suites.py" phase-spec "$name" --round "$ROUND") ||
@@ -413,11 +494,21 @@ protocol_phase() {
     fi
   fi
   nvidia-smi nvlink -gt d > "$OUT/nvlink-$name-before.txt" 2>&1
-  if ! bench_launch "$name" "$model" && [ "$SPEC_FALLBACK" = 1 ] &&
-      grep -q "larger than the available KV cache memory" "$OUT/vllm-$name.log" 2>/dev/null; then
-    fitted=$(grep -o "estimated maximum model length is [0-9]*" "$OUT/vllm-$name.log" | head -n 1 | grep -o "[0-9]*$")
+  if [ "$SPEC_PROXY" = pd ]; then
+    pd_env=$(bench_preflight "$name")
+    case "$pd_env" in
+      default) events="${events:+$events; }NIXL preflight passed with the defaults" ;;
+      UCX_MEMTYPE_CACHE=n) SPEC_ENV+=("$pd_env"); events="${events:+$events; }NIXL preflight passed with $pd_env only" ;;
+      *) reason=${pd_env#none: }; note="PD not possible here: NIXL preflight failed (${reason:-no answer within 600 s})" ;;
+    esac
+  fi
+  if [ -z "$note" ] && ! bench_launch "$name" "$model" && [ "$SPEC_FALLBACK" = 1 ]; then
+    short=$(bench_kv_short "$name")
+  fi
+  if [ -n "$short" ]; then
+    fitted=$(grep -o "estimated maximum model length is [0-9]*" <<< "$short" | head -n 1 | grep -o "[0-9]*$")
     log "[$name] the KV cache cannot hold --max-model-len $SPEC_LEN (vLLM estimates ${fitted:-?}); one relaunch with -1"
-    [ "$SPEC_REPLICAS" -gt 1 ] && bench_replica stop > "$OUT/replica-$name-short-stop.json" 2>&1
+    bench_has_peer && bench_replica stop > "$OUT/replica-$name-short-stop.json" 2>&1
     bench_stop
     mv "$OUT/vllm-$name.log" "$OUT/vllm-$name-short.log"
     bench_clean "$name" retry $((SPEC_NODES * SPEC_REPLICAS)) > /dev/null
@@ -429,6 +520,17 @@ protocol_phase() {
     note=""
     bench_launch "$name" "$model"
   fi
+  if [ -n "$note" ] && { [ "$pd_env" = default ] || [ "$pd_env" = UCX_MEMTYPE_CACHE=n ]; } && bench_vram_host "$name"; then
+    log "[$name] UCX typed the KV cache's VRAM as host memory although the preflight passed; one debug relaunch"
+    bench_replica stop > "$OUT/replica-$name-vram-stop.json" 2>&1
+    bench_stop
+    mv "$OUT/vllm-$name.log" "$OUT/vllm-$name-vram.log"
+    bench_clean "$name" retry $((SPEC_NODES * SPEC_REPLICAS)) > /dev/null
+    SPEC_ENV+=("VLLM_LOGGING_LEVEL=DEBUG")
+    note=""
+    if bench_launch "$name" "$model"; then debug="the debug relaunch started"; else debug="the debug relaunch failed again"; fi
+    note="UCX typed the KV cache's VRAM as host memory although the NIXL preflight passed ($pd_env); $debug; $(bench_pd_descs "$name") (no suites)"
+  fi
   if [ -n "$note" ]; then
     :
   elif ! bench_effective "$name" "$SPEC_LEN" > "$OUT/effective-$name.json"; then
@@ -438,6 +540,7 @@ protocol_phase() {
   fi
   report "node0.$name.facts" --text "$(server_facts "$name" | tail -c 7600)"
   report "node0.$name.parallel" --text "$(parallel_facts "$name")"
+  bench_has_peer && bench_peer_facts "$name"
   [ -f "$OUT/effective-$name.json" ] && report "node0.$name.effective" --file "$OUT/effective-$name.json"
   [ -f "$OUT/nccl-$name.json" ] && report "node0.$name.nccl" --file "$OUT/nccl-$name.json"
   if [ -z "$note" ]; then
@@ -445,7 +548,8 @@ protocol_phase() {
     [ "$len" = -1 ] && len=$(python3 -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=30))['data'][0]['max_model_len'])" 2>/dev/null)
     report "node0.$name.startup" --text "{\"seconds_to_healthy\": $(cat "$OUT/startup-$name.seconds"), \"nccl_ib\": \"$IB_MODE\", \"max_model_len\": ${len:-null}}"
   else
-    report "node0.$name.failure" --text "$(failure_tail "$name"; [ "$SPEC_REPLICAS" -gt 1 ] && bench_peer_tail "$name")"
+    report "node0.$name.failure" --text "$(cat "$OUT/descs-$name.json" 2>/dev/null; failure_tail "$name"
+                                            bench_has_peer && bench_peer_tail "$name")"
   fi
   python3 - "$OUT/start-$name.json" "$name" "$requested" "${len:-}" "$fallback" "$OUT/startup-$name.seconds" \
     "$note" "$SPEC_EXPERIMENTAL" "$SPEC_PROXY" <<'EOF'
@@ -461,7 +565,7 @@ EOF
       python3 "$BENCH/lb_proxy.py" --listen 127.0.0.1:8100 --prefill http://127.0.0.1:8000 \
         --decode "http://$peer:8000" > "$OUT/lb-$name.log" 2>&1 &
       lb=$!
-    elif [ -n "$peer" ]; then
+    elif [ "$SPEC_PROXY" = lb ] && [ -n "$peer" ]; then
       python3 "$BENCH/lb_proxy.py" --listen 127.0.0.1:8100 --backend http://127.0.0.1:8000 \
         --backend "http://$peer:8000" > "$OUT/lb-$name.log" 2>&1 &
       lb=$!
@@ -478,7 +582,7 @@ EOF
       fi
     fi
     [ -n "$note" ] && report "node0.$name.failure" --text "$(echo "$note"; tail -c 4000 "$OUT/lb-$name.log" 2>/dev/null
-                                                            [ "$SPEC_REPLICAS" -gt 1 ] && bench_peer_tail "$name")"
+                                                            bench_has_peer && bench_peer_tail "$name")"
   fi
   if [ -z "$note" ]; then
     rates_var="SLO_RATES_$SPEC_RATES_KEY"
@@ -494,7 +598,7 @@ EOF
       phase_result "$name" passed "$began" "$events"
     else
       report "node0.$name.client_failure" --text "$(tail -c 2500 "$OUT/client-$name.log"; failure_tail "$name" | tail -c 5000
-                                                     [ "$SPEC_REPLICAS" -gt 1 ] && bench_peer_tail "$name")"
+                                                     bench_has_peer && bench_peer_tail "$name")"
       note="client failed"
       [ "$rc" = 124 ] && [ -n "${limit[*]}" ] && note="the client hit the ${limit[1]} s limit of an experimental phase"
     fi
@@ -504,7 +608,7 @@ EOF
   [ -n "$lb" ] && python3 -c "import urllib.request; print(urllib.request.urlopen('$base/lb/stats', timeout=10).read().decode())" \
     > "$OUT/lb-stats-$name.json" 2>/dev/null
   [ -n "$lb" ] && kill "$lb" 2>/dev/null
-  [ "$SPEC_REPLICAS" -gt 1 ] && bench_replica stop > "$OUT/replica-$name-stop.json" 2>&1
+  bench_has_peer && bench_replica stop > "$OUT/replica-$name-stop.json" 2>&1
   bench_stop
   nvidia-smi nvlink -gt d > "$OUT/nvlink-$name-after.txt" 2>&1
   bench_clean "$name" after $((SPEC_NODES * SPEC_REPLICAS)) > /dev/null ||

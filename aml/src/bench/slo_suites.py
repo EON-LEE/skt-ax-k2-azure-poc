@@ -99,12 +99,27 @@ def rate_order(round_, workload, count):
     return order
 
 
+def without_flags(args, flags):
+    """args without the given flags ({flag: number of values it takes})."""
+    out, skip = [], 0
+    for arg in args:
+        if skip:
+            skip -= 1
+        elif arg in flags:
+            skip = flags[arg]
+        else:
+            out.append(arg)
+    return out
+
+
 def phase_spec(protocol, phase, round_=None):
     """Server flags, environment and client suites of a protocol phase (a PHASE_PLAN token). Every phase gets
     the same launcher and common flags, --max-num-seqs, --gpu-memory-utilization and --api-server-count;
     performance phases share one --max-model-len, capacity phases fit it to the KV cache (-1). A phase with
     two servers runs `peer_args` on node1 behind lb_proxy.py: the same server (proxy lb) or, for a layout with
-    prefill/decode roles, the decode server (proxy pd)."""
+    prefill/decode roles, the decode server (proxy pd). An mp-multinode layout runs `peer_args` on node1 as
+    headless DP engines of node0's server: node0's flags without the API-server flags, plus --headless and the
+    first DP rank of node1 (server.launchers)."""
     entry = phase_entry(protocol, phase)
     layout = resolve_layout(protocol, entry["layout"])
     server = protocol["server"]
@@ -114,23 +129,32 @@ def phase_spec(protocol, phase, round_=None):
     options = entry.get("options", {})
     replicas = entry.get("replicas", 1)
     roles = layout.get("roles") or {}
+    launcher = layout.get("launcher", "")
+    multinode = server["launchers"][launcher] if launcher else {}
 
     def flags(extra):
         return [*server["launcher_flags"], "--max-model-len", str(length), "--gpu-memory-utilization",
                 str(server["gpu_memory_utilization"]), "--max-num-seqs", str(seqs), *layout["args"], *extra,
                 "--max-num-batched-tokens", str(batched), *server["common_flags"]]
 
-    args = flags(roles.get("prefill", []))
+    if multinode:
+        args = flags(multinode["engine_args"])
+        local = args[args.index("--data-parallel-size-local") + 1]
+        peer = [*without_flags(args, multinode["api_only_flags"]),
+                *(local if arg == "@dp_local" else arg for arg in multinode["peer_args"])]
+    else:
+        args = flags(roles.get("prefill", []))
+        peer = (flags(roles.get("decode", [])) if roles else args) if replicas > 1 else []
     suites = phase_suites(protocol, phase, round_)
     return {"phase": phase, "label": entry.get("label", entry["layout"]), "layout": entry["layout"],
             "rates_key": "Dx2" if options.get("slo", {}).get("rate_set") == "dx2" else rates_key(protocol, entry["layout"]),
             "checkpoint": layout["checkpoint"], "nodes": layout["nodes"], "replicas": replicas,
             "max_model_len": length, "max_num_seqs": seqs, "gpu_memory_utilization": server["gpu_memory_utilization"],
-            "max_num_batched_tokens": batched, "args": args,
-            "peer_args": (flags(roles.get("decode", [])) if roles else args) if replicas > 1 else [],
+            "max_num_batched_tokens": batched, "args": args, "peer_args": peer, "launcher": launcher,
             "proxy": entry.get("proxy") or ("lb" if replicas > 1 else ""),
             "env": {**server["env"], **server["benchmark_env"], **layout.get("env", {})},
-            "node_env": list(layout.get("node_env", [])), "experimental": bool(layout.get("experimental")),
+            "node_env": [*layout.get("node_env", []), *multinode.get("node_env", [])],
+            "experimental": bool(layout.get("experimental")),
             "length_fallback": "screen" in suites and length != -1, "suites": suites, "options": options}
 
 
@@ -140,7 +164,7 @@ def shell_spec(spec):
                "SPEC_CHECKPOINT": spec["checkpoint"], "SPEC_NODES": spec["nodes"], "SPEC_REPLICAS": spec["replicas"],
                "SPEC_LEN": spec["max_model_len"], "SPEC_SEQS": spec["max_num_seqs"],
                "SPEC_MEM": spec["gpu_memory_utilization"], "SPEC_BATCHED": spec["max_num_batched_tokens"],
-               "SPEC_PROXY": spec["proxy"], "SPEC_EXPERIMENTAL": int(spec["experimental"]),
+               "SPEC_PROXY": spec["proxy"], "SPEC_LAUNCHER": spec["launcher"], "SPEC_EXPERIMENTAL": int(spec["experimental"]),
                "SPEC_FALLBACK": int(spec["length_fallback"]),
                "SPEC_SUITES": ",".join(spec["suites"]), "SPEC_OPTIONS": json.dumps(spec["options"])}
     lines = [f"{name}={shlex.quote(str(value))}" for name, value in scalars.items()]
@@ -843,8 +867,8 @@ def screen_points(protocol, round_, ladder=None):
 
 
 def suite_screen(args):
-    """One screening launch: start facts, short parity, warm-up, Part R and Poisson W1. Each step that fails is
-    recorded and the next one runs while the server answers /health."""
+    """One screening launch: start facts, short parity, warm-up, Part R and Poisson W1 (options.screen.steps runs a
+    subset). Each step that fails is recorded and the next one runs while the server answers /health."""
     protocol = protocol_context(args)
     screen = protocol["screen"]
     if args.round != screen["round"]:
@@ -863,15 +887,20 @@ def suite_screen(args):
         finally:
             steps[name]["seconds"] = round(time.time() - began, 1)
 
-    result["facts"] = step("facts", lambda: screen_facts(args.base))
-    result["parity"] = step("parity", lambda: screen_parity(args, protocol))
-    step("warmup", lambda: suite_warmup(args))
-    points = screen_points(protocol, args.round, args.options.get("screen", {}).get("ladder"))
+    options = args.options.get("screen", {})
+    wanted = options.get("steps") or screen["steps"]  # scr-Dref: facts and parity only
+    if "facts" in wanted:
+        result["facts"] = step("facts", lambda: screen_facts(args.base))
+    if "parity" in wanted:
+        result["parity"] = step("parity", lambda: screen_parity(args, protocol))
+    if "warmup" in wanted:
+        step("warmup", lambda: suite_warmup(args))
+    points = screen_points(protocol, args.round, options.get("ladder")) if "points" in wanted else []
     data = None
-    if vs.server_healthy(args.base):
+    if points and vs.server_healthy(args.base):
         data = step("points", lambda: run_points(args, "screen", points, protocol, "Part R and Poisson W1"))
     result.update(plan=[p["name"] for p in points], points=(data or {}).get("points", []), steps=steps)
-    if data is None or data.get("aborted"):
+    if points and (data is None or data.get("aborted")):
         result["aborted"] = ((data or {}).get("aborted") or steps.get("points", {}).get("error")
                              or "the server stopped answering /health before the points")
     return result

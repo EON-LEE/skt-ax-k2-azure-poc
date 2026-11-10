@@ -5,6 +5,16 @@
       log (vllm-<phase>-replica1.log), into <view>/node<i>/ for bench_stats.py package.
   python3 node_tools.py tail <outputs> <head ip> <log name>
       Prints the tail of <log name> from the other nodes (failure reports of two-server phases).
+  python3 node_tools.py facts <out.json> <outputs> <head ip> <log name>
+      The KV cache size and DP rank lines of the latest start in <log name> on the other nodes: their engines
+      (a second server, an mp-multinode layout's headless DP engines) never reach node0's log.
+  python3 node_tools.py preflight <out.json> <head ip> <nixl_preflight.py> [--timeout 120]
+      NIXL's VRAM registration (nixl_preflight.py) on node0 and every other node, with the defaults and with
+      UCX_MEMTYPE_CACHE=n, each run limited to --timeout seconds. Prints the PD servers' environment: the first
+      variant that passes on every node ("default" or "UCX_MEMTYPE_CACHE=n"), else "none: <reason>".
+  python3 node_tools.py descs <out.json> <outputs> <head ip> <phase>
+      vLLM NixlConnector's debug lines "Registering descs: [(base, length, device, ''), ...]" and UCX's host-typing
+      errors from both PD servers' logs of the latest start, with the zero-length descriptors counted.
   python3 node_tools.py reclaim <out.json> <nodes> <head ip> [--port 8000]
       One reclaim of a node set that was not clean before a phase, on node0 and, when the phase uses more than one
       node, on every other node: SIGKILL the leftover serving processes among those that hold a GPU device or
@@ -28,6 +38,11 @@ TAIL_LINES = 200
 PULLED = ("env.json", "gpu-telemetry.csv", "ib-counters.jsonl")
 RAY_SYSTEM = ("raylet", "gcs_server", "dashboard", "log_monitor", "monitor.py", "runtime_env", "ray_client_server")
 GPU_DEVICE = re.compile(r"/dev/nvidia(\d+|-uvm)")
+START_MARK = "=== axk2 replica start"  # written by bench_replica before every launch of node1's process
+KV_TOKENS = re.compile(r"GPU KV cache size: ([\d,]+) tokens")
+FACT_LINES = re.compile(r"GPU KV cache size|Maximum concurrency for|is assigned as DP rank|Auto-fit max_model_len")
+PREFLIGHT_VARIANTS = (("default", {}), ("UCX_MEMTYPE_CACHE=n", {"UCX_MEMTYPE_CACHE": "n"}))
+DESC = re.compile(r"\((\d+), (\d+), (\d+), '[^']*'\)")
 MP_CHILD = ("multiprocessing.spawn", "--multiprocessing-fork")
 
 
@@ -64,6 +79,119 @@ def node_tail(outputs, name):
         if os.path.basename(folder) != "node0" and os.path.exists(path):
             parts.append(f"--- {os.path.basename(folder)}/{name}, last {TAIL_LINES} lines ---\n{tail_text(path)}")
     return "\n".join(parts)
+
+
+def node_facts(outputs, name, max_lines=24):
+    """{node: {kv_tokens, lines}} from <name> after its last start mark (runs on the node; node0 is skipped)."""
+    facts = {}
+    for folder in sorted(glob.glob(os.path.join(outputs, "node*"))):
+        path = os.path.join(folder, name)
+        if os.path.basename(folder) == "node0" or not os.path.exists(path):
+            continue
+        kv, lines = [], []
+        with open(path, errors="replace") as handle:
+            for line in handle:
+                if line.startswith(START_MARK):
+                    kv, lines = [], []
+                    continue
+                found = KV_TOKENS.search(line)
+                if found:
+                    kv.append(int(found.group(1).replace(",", "")))
+                if FACT_LINES.search(line) and len(lines) < max_lines:
+                    lines.append(re.sub(r"^.*?\[[\w./-]+:\d+\] ", "", line.strip())[:240])
+        facts[os.path.basename(folder)] = {"kv_tokens": kv, "lines": lines}
+    return facts
+
+
+def facts(out, outputs, head, name):
+    found = {}
+    for value in on_other_nodes(connect(), node_facts, head, outputs, name).values():
+        found.update(value)
+    result = {"nodes": found, "kv_tokens": [tokens for node in found.values() for tokens in node["kv_tokens"]]}
+    with open(out, "w") as handle:
+        json.dump(result, handle)
+    return result
+
+
+def run_preflight(script, variants, timeout=120):
+    """{variant: nixl_preflight.py's JSON summary} on this node, each run limited to `timeout` seconds."""
+    out = {}
+    for name, extra in variants:
+        env = {**os.environ, **extra, "CUDA_VISIBLE_DEVICES": "0"}  # Ray hides every GPU from a GPU-less task
+        try:
+            run = subprocess.run([sys.executable, script], capture_output=True, text=True, env=env, timeout=timeout)
+            lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+            out[name] = json.loads(lines[-1]) if lines else {"ok": False, "reason": f"no summary (exit {run.returncode})"}
+        except subprocess.TimeoutExpired:
+            out[name] = {"ok": False, "reason": f"no answer within {timeout} s"}
+        except (OSError, ValueError) as exc:
+            out[name] = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+    return out
+
+
+def preflight(out, head, script, timeout=120):
+    """The preflight on node0 and every other node; the first variant that passes on every node (two at least)."""
+    result = {"node0": run_preflight(script, PREFLIGHT_VARIANTS, timeout)}
+    try:
+        found = on_other_nodes(connect(), run_preflight, head, script, PREFLIGHT_VARIANTS, timeout, timeout=3 * timeout)
+        for index, (_, value) in enumerate(sorted(found.items()), start=1):
+            result[f"node{index}"] = value
+    except Exception as exc:
+        result["ray_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    nodes = sorted(key for key in result if key.startswith("node"))
+    passing = [name for name, _ in PREFLIGHT_VARIANTS
+               if len(nodes) > 1 and all(result[node].get(name, {}).get("ok") for node in nodes)]
+    result["choice"] = passing[0] if passing else None
+    if not passing:
+        result["reason"] = ("; ".join(f"{node} {name}: {result[node].get(name, {}).get('reason') or 'failed'}"
+                                      for node in nodes for name, _ in PREFLIGHT_VARIANTS
+                                      if not result[node].get(name, {}).get("ok"))
+                            if len(nodes) > 1 else f"node1 not reached: {result.get('ray_error', 'no other node')}")[:400]
+    with open(out, "w") as handle:
+        json.dump(result, handle)
+    return result
+
+
+def registering_descs(path, max_lines=8, max_chars=1200):
+    """The debug lines "Registering descs: [...]" and UCX's "detected as host" errors of a log after its last start
+    mark: each with its descriptor count, its zero-length descriptors and its first max_chars characters."""
+    lines = []
+    if os.path.exists(path):
+        with open(path, errors="replace") as handle:
+            for line in handle:
+                if line.startswith(START_MARK):
+                    lines = []
+                elif "Registering descs" in line or "detected as host" in line:
+                    lines.append(line.strip())
+    out = []
+    for line in lines[:max_lines]:
+        found = DESC.findall(line)
+        out.append({"kind": "registering" if "Registering descs" in line else "host", "descs": len(found),
+                    "zero_length": sum(1 for desc in found if desc[1] == "0"),
+                    "text": re.sub(r"^.*?\[[\w./-]+:\d+\] ", "", line)[:max_chars]})
+    return out
+
+
+def node_descs(outputs, name):
+    """{node: registering_descs} of <name> on this node (runs on the node; node0 is skipped)."""
+    return {os.path.basename(folder): registering_descs(os.path.join(folder, name))
+            for folder in sorted(glob.glob(os.path.join(outputs, "node*"))) if os.path.basename(folder) != "node0"}
+
+
+def descs(out, outputs, head, phase):
+    result = {"node0": registering_descs(os.path.join(outputs, "node0", f"vllm-{phase}.log"))}
+    try:
+        for value in on_other_nodes(connect(), node_descs, head, outputs, f"vllm-{phase}-replica1.log").values():
+            result.update(value)
+    except Exception as exc:
+        result["ray_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    lines = [line for key, value in result.items() if key.startswith("node") for line in value]
+    registering = [line for line in lines if line["kind"] == "registering"]
+    result["summary"] = (f"{len(registering)} 'Registering descs' lines, {sum(l['descs'] for l in registering)} "
+                         f"descriptors, {sum(l['zero_length'] for l in registering)} of zero length")
+    with open(out, "w") as handle:
+        json.dump(result, handle)
+    return result
 
 
 def write_files(view, files):
@@ -281,6 +409,21 @@ def main(argv=None):
     tail.add_argument("outputs")
     tail.add_argument("head")
     tail.add_argument("name")
+    found = commands.add_parser("facts", help="KV cache sizes and DP rank lines of a log on the other nodes")
+    found.add_argument("out")
+    found.add_argument("outputs")
+    found.add_argument("head")
+    found.add_argument("name")
+    checked = commands.add_parser("preflight", help="NIXL's VRAM registration on every node; the PD servers' environment")
+    checked.add_argument("out")
+    checked.add_argument("head")
+    checked.add_argument("script")
+    checked.add_argument("--timeout", type=int, default=120)
+    registered = commands.add_parser("descs", help="the PD servers' 'Registering descs' lines and zero-length descriptors")
+    registered.add_argument("out")
+    registered.add_argument("outputs")
+    registered.add_argument("head")
+    registered.add_argument("phase")
     reclaimed = commands.add_parser("reclaim", help="kill leftover GPU processes, placement groups and port listeners")
     reclaimed.add_argument("out")
     reclaimed.add_argument("nodes", type=int)
@@ -291,6 +434,14 @@ def main(argv=None):
         print(json.dumps({"files": pull(args.view, args.outputs, args.head)}))
     elif args.command == "tail":
         print("\n".join(on_other_nodes(connect(), node_tail, args.head, args.outputs, args.name).values()))
+    elif args.command == "preflight":
+        result = preflight(args.out, args.head, args.script, args.timeout)
+        print(result["choice"] or f"none: {result['reason']}")
+    elif args.command == "descs":
+        print(descs(args.out, args.outputs, args.head, args.phase)["summary"])
+    elif args.command == "facts":
+        kv = facts(args.out, args.outputs, args.head, args.name)["kv_tokens"]
+        print(f"{len(kv)} engines on the other nodes, {sum(kv):,} KV tokens")
     else:
         print(reclaim(args.out, args.nodes, args.head, args.port)["summary"])
     return 0
