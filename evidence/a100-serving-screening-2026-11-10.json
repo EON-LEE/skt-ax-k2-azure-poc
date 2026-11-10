@@ -1,0 +1,5291 @@
+{
+ "schema": "axk2-screen-selection/1",
+ "protocol_status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit with the chosen ROUND_LAYOUTS; publish every run, including invalid and aborted runs.",
+ "rule": "A always. FP8: the eligible layout other than A with the highest R/isl8192-c32 output tok/s. NVFP4: the eligible one-node layout (D included) with the highest R/isl8192-c32 output tok/s. D x 2: when lambda*(W1, standard SLO) of scr-Dx2 >= 1.9 x that of scr-Dx1. Exact ties go to the layout listed first. A KV-bound or capacity-bound flag at the ranking point is reported next to the score with the peak KV usage and the peak of running requests; it never excludes a layout.",
+ "always": [
+  "A"
+ ],
+ "families": {
+  "fp8": {
+   "reference": "scr-A",
+   "rank_by": "R/isl8192-c32.output_tok_s",
+   "ranking": [
+    "scr-B0",
+    "scr-C1rr",
+    "scr-C1",
+    "scr-A4"
+   ],
+   "choice": "B0",
+   "candidates": {
+    "scr-C2": {
+     "layout": "C2",
+     "phase": "scr-C2",
+     "reference": "scr-A",
+     "eligible": false,
+     "value": 275.5389323064178,
+     "problems": [
+      "R/isl1024-c1.tpot_p50 is 2.00 x the reference's (limit 1.5)",
+      "R/isl8192-c1.tpot_p50 is 1.95 x the reference's (limit 1.5)"
+     ],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.7175,
+      "peak_running": 32.0
+     }
+    },
+    "scr-C4": {
+     "layout": "C4",
+     "phase": "scr-C4",
+     "reference": "scr-A",
+     "eligible": false,
+     "value": null,
+     "problems": [
+      "phase failed: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+      "parity: no short parity against the job's reference",
+      "R/isl8192-c32.output_tok_s missing (point not run or invalid)",
+      "R/isl1024-c1.tpot_p50 missing (this launch)",
+      "R/isl8192-c1.tpot_p50 missing (this launch)"
+     ],
+     "ranking_point": {
+      "flags": []
+     }
+    },
+    "scr-C4m": {
+     "layout": "C4m",
+     "phase": "scr-C4m",
+     "reference": "scr-A@rerun-fp8-dp",
+     "eligible": false,
+     "value": 334.3761977743696,
+     "problems": [
+      "R/isl1024-c1.tpot_p50 is 1.95 x the reference's (limit 1.5)",
+      "R/isl8192-c1.tpot_p50 is 1.90 x the reference's (limit 1.5)"
+     ],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.4146,
+      "peak_running": 32.0
+     }
+    },
+    "scr-C8": {
+     "layout": "C8",
+     "phase": "scr-C8",
+     "reference": "scr-A",
+     "eligible": false,
+     "value": null,
+     "problems": [
+      "phase failed: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+      "parity: no short parity against the job's reference",
+      "R/isl8192-c32.output_tok_s missing (point not run or invalid)",
+      "R/isl1024-c1.tpot_p50 missing (this launch)",
+      "R/isl8192-c1.tpot_p50 missing (this launch)"
+     ],
+     "ranking_point": {
+      "flags": []
+     }
+    },
+    "scr-C8m": {
+     "layout": "C8m",
+     "phase": "scr-C8m",
+     "reference": "scr-A@rerun-fp8-dp",
+     "eligible": false,
+     "value": 379.90779749473285,
+     "problems": [
+      "R/isl1024-c1.tpot_p50 is 2.14 x the reference's (limit 1.5)",
+      "R/isl8192-c1.tpot_p50 is 2.06 x the reference's (limit 1.5)"
+     ],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.2462,
+      "peak_running": 32.0
+     }
+    },
+    "scr-C16": {
+     "layout": "C16",
+     "phase": "scr-C16",
+     "reference": "scr-A",
+     "eligible": false,
+     "value": null,
+     "problems": [
+      "phase failed: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+      "parity: no short parity against the job's reference",
+      "R/isl8192-c32.output_tok_s missing (point not run or invalid)",
+      "R/isl1024-c1.tpot_p50 missing (this launch)",
+      "R/isl8192-c1.tpot_p50 missing (this launch)"
+     ],
+     "ranking_point": {
+      "flags": []
+     }
+    },
+    "scr-C16m": {
+     "layout": "C16m",
+     "phase": "scr-C16m",
+     "reference": "scr-A@rerun-fp8-dp",
+     "eligible": false,
+     "value": 384.9699845621036,
+     "problems": [
+      "could not hold --max-model-len 131072 (relaunched with -1)",
+      "R/isl1024-c1.tpot_p50 is 2.37 x the reference's (limit 1.5)",
+      "R/isl8192-c1.tpot_p50 is 2.25 x the reference's (limit 1.5)"
+     ],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.3006,
+      "peak_running": 32.0
+     }
+    },
+    "scr-C1": {
+     "layout": "C1",
+     "phase": "scr-C1",
+     "reference": "scr-A",
+     "eligible": true,
+     "value": 196.70555789277088,
+     "problems": [],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.4456,
+      "peak_running": 32.0
+     }
+    },
+    "scr-C1rr": {
+     "layout": "C1rr",
+     "phase": "scr-C1rr",
+     "reference": "scr-A",
+     "eligible": true,
+     "value": 203.7442730830858,
+     "problems": [],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.4462,
+      "peak_running": 32.0
+     }
+    },
+    "scr-B0": {
+     "layout": "B0",
+     "phase": "scr-B0",
+     "reference": "scr-A",
+     "eligible": true,
+     "value": 219.7607853026262,
+     "problems": [],
+     "ranking_point": {
+      "flags": [
+       "capacity-bound",
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 0.9998,
+      "peak_running": 32.0
+     }
+    },
+    "scr-B0dcp": {
+     "layout": "B0dcp",
+     "phase": "scr-B0dcp",
+     "reference": "scr-A",
+     "eligible": false,
+     "value": null,
+     "problems": [
+      "phase failed: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+      "parity: no short parity against the job's reference",
+      "R/isl8192-c32.output_tok_s missing (point not run or invalid)",
+      "R/isl1024-c1.tpot_p50 missing (this launch)",
+      "R/isl8192-c1.tpot_p50 missing (this launch)"
+     ],
+     "ranking_point": {
+      "flags": []
+     }
+    },
+    "scr-A4": {
+     "layout": "A4",
+     "phase": "scr-A4",
+     "reference": "scr-A",
+     "eligible": true,
+     "value": 176.13091283854993,
+     "problems": [],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.2484,
+      "peak_running": 32.0
+     }
+    }
+   }
+  },
+  "nvfp4": {
+   "reference": "scr-D",
+   "rank_by": "R/isl8192-c32.output_tok_s",
+   "ranking": [
+    "scr-D42",
+    "scr-D",
+    "scr-Err",
+    "scr-E"
+   ],
+   "choice": "D42",
+   "candidates": {
+    "scr-D": {
+     "layout": "D",
+     "phase": "scr-D",
+     "reference": "scr-D",
+     "eligible": true,
+     "value": 193.67940694829292,
+     "problems": [],
+     "ranking_point": {
+      "flags": [
+       "capacity-bound",
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 0.9997,
+      "peak_running": 28.0
+     }
+    },
+    "scr-E": {
+     "layout": "E",
+     "phase": "scr-E",
+     "reference": "scr-D",
+     "eligible": true,
+     "value": 180.84079914274815,
+     "problems": [],
+     "ranking_point": {
+      "flags": [
+       "capacity-bound",
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 0.9995,
+      "peak_running": 28.0
+     }
+    },
+    "scr-Err": {
+     "layout": "Err",
+     "phase": "scr-Err",
+     "reference": "scr-D",
+     "eligible": true,
+     "value": 185.26517073278063,
+     "problems": [],
+     "ranking_point": {
+      "flags": [
+       "capacity-bound",
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 0.9992,
+      "peak_running": 28.0
+     }
+    },
+    "scr-D8": {
+     "layout": "D8",
+     "phase": "scr-D8",
+     "reference": "scr-D",
+     "eligible": false,
+     "value": 268.175958313872,
+     "problems": [
+      "could not hold --max-model-len 131072 (relaunched with -1)",
+      "R/isl1024-c1.tpot_p50 is 1.85 x the reference's (limit 1.2)",
+      "R/isl8192-c1.tpot_p50 is 1.79 x the reference's (limit 1.2)"
+     ],
+     "ranking_point": {
+      "flags": [
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 0.8763,
+      "peak_running": 24.0
+     }
+    },
+    "scr-D24": {
+     "layout": "D24",
+     "phase": "scr-D24",
+     "reference": "scr-D",
+     "eligible": false,
+     "value": 246.16173327230803,
+     "problems": [
+      "R/isl1024-c1.tpot_p50 is 1.54 x the reference's (limit 1.2)",
+      "R/isl8192-c1.tpot_p50 is 1.54 x the reference's (limit 1.2)"
+     ],
+     "ranking_point": {
+      "flags": [
+       "capacity-bound",
+       "kv-bound"
+      ],
+      "peak_kv_cache_usage": 1.0,
+      "peak_running": 32.0
+     }
+    },
+    "scr-D42": {
+     "layout": "D42",
+     "phase": "scr-D42",
+     "reference": "scr-D",
+     "eligible": true,
+     "value": 194.56465615551576,
+     "problems": [],
+     "ranking_point": {
+      "flags": [],
+      "peak_kv_cache_usage": 0.572,
+      "peak_running": 32.0
+     }
+    }
+   }
+  }
+ },
+ "dx2": {
+  "decision": "pass",
+  "lambda_dx2": {
+   "value": 1.405128205128205,
+   "bracketed": true,
+   "between": [
+    1.2,
+    2.0
+   ],
+   "output_tok_s": 718.9778717948718,
+   "total_tok_s": 2162.3805128205126,
+   "monotonic": true
+  },
+  "lambda_dx1": {
+   "value": 0.6892458723784025,
+   "bracketed": true,
+   "between": [
+    0.6,
+    1.0
+   ],
+   "output_tok_s": 349.08385229808124,
+   "total_tok_s": 1048.8063391343148,
+   "monotonic": true
+  },
+  "ratio_min": 1.9,
+  "ratio": 2.038645803245052,
+  "run_dx2_job": true,
+  "note": "a lambda* outside its ladder is a bound; when the bounds cannot decide, the D x 2 job (slo-nvfp4-2replica-nd96.yml) decides with full grids"
+ },
+ "pd": {
+  "scr-PD": {
+   "status": "failed",
+   "note": "experimental phase: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "source": "screen-nvfp4-2node",
+   "preflight": null,
+   "lambda_w1_standard": null,
+   "parity": null,
+   "invalid_points": [],
+   "selected": false,
+   "rule": "experimental: reported (lambda*, parity, preflight, failures, InfiniBand bytes), never selected in this protocol version. The PD rerun job has no Dx1 or Dx2: PD's pairs then take them from the earlier two-node job and are labelled cross-job."
+  },
+  "scr-PD@rerun-pd-1": {
+   "status": "failed",
+   "note": "experimental phase: PD not possible here: NIXL preflight failed (node0 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node0 UCX_MEMTYPE_CACHE=n: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node1 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registrati)",
+   "source": "rerun-pd-1",
+   "preflight": {
+    "choice": null,
+    "reason": "node0 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node0 UCX_MEMTYPE_CACHE=n: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node1 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registrati"
+   },
+   "lambda_w1_standard": null,
+   "parity": null,
+   "invalid_points": [],
+   "selected": false,
+   "rule": "experimental: reported (lambda*, parity, preflight, failures, InfiniBand bytes), never selected in this protocol version. The PD rerun job has no Dx1 or Dx2: PD's pairs then take them from the earlier two-node job and are labelled cross-job."
+  },
+  "scr-PD@rerun-pd-2": {
+   "status": "failed",
+   "note": "experimental phase: client failed [NIXL preflight passed with UCX_TLS=all UCX_NET_DEVICES=all]",
+   "source": "rerun-pd-2",
+   "preflight": {
+    "job_env": {
+     "node0": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     },
+     "node1": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     }
+    },
+    "choice": "UCX_TLS=all UCX_NET_DEVICES=all",
+    "choice_env": {
+     "UCX_TLS": "all",
+     "UCX_NET_DEVICES": "all"
+    }
+   },
+   "lambda_w1_standard": null,
+   "parity": null,
+   "invalid_points": [],
+   "selected": false,
+   "rule": "experimental: reported (lambda*, parity, preflight, failures, InfiniBand bytes), never selected in this protocol version. The PD rerun job has no Dx1 or Dx2: PD's pairs then take them from the earlier two-node job and are labelled cross-job."
+  },
+  "scr-PD@rerun-pd-3": {
+   "status": "passed",
+   "note": "NIXL preflight passed with UCX_TLS=all UCX_NET_DEVICES=all",
+   "source": "rerun-pd-3",
+   "preflight": {
+    "job_env": {
+     "node0": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     },
+     "node1": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     }
+    },
+    "choice": "UCX_TLS=all UCX_NET_DEVICES=all",
+    "choice_env": {
+     "UCX_TLS": "all",
+     "UCX_NET_DEVICES": "all"
+    }
+   },
+   "lambda_w1_standard": {
+    "value": 1.3373390557939913,
+    "bracketed": true,
+    "between": [
+     1.2,
+     2.0
+    ],
+    "output_tok_s": 677.3595708154505,
+    "total_tok_s": 2058.866227467811,
+    "monotonic": true
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.036592,
+    "p99_abs_logprob_diff": 0.740036,
+    "top1_agreement": 0.98571,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.001973,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.103617,
+      "top1_agreement": 0.95603
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008856,
+      "top1_agreement": 0.99658
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.031922,
+      "top1_agreement": 0.99072
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 1,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": 112,
+     "ko-06-unsu-joeun-nal@0": 6,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": 62
+    }
+   },
+   "invalid_points": [],
+   "selected": false,
+   "rule": "experimental: reported (lambda*, parity, preflight, failures, InfiniBand bytes), never selected in this protocol version. The PD rerun job has no Dx1 or Dx2: PD's pairs then take them from the earlier two-node job and are labelled cross-job."
+  }
+ },
+ "round_layouts": "B0,D42",
+ "sensitivity": null,
+ "submit": "--set environment_variables.ROUND_LAYOUTS=B0,D42",
+ "rates": {
+  "slo_rates_env": [
+   "SLO_RATES_A",
+   "SLO_RATES_B0",
+   "SLO_RATES_D42"
+  ],
+  "soak_rates_keys": [
+   "A",
+   "B0",
+   "D42"
+  ],
+  "soak_rates": "SOAK_RATES=A=<req/s>,B0=<req/s>,D42=<req/s>",
+  "note": "the round-3 soak looks these keys up (A2 and the sensitivity runs use their base layout's)"
+ },
+ "pairs": [
+  {
+   "name": "A1: indexer grid scales with max_model_len",
+   "x": "scr-A-auto",
+   "base": "scr-A",
+   "cross_job": false,
+   "ratios": {
+    "R/isl1024-c32.itl_p50": 1.0764939514295244,
+    "R/isl1024-c32.output_tok_s": 0.9378129985570517,
+    "R/isl1024-c1.tpot_p50": 1.0051949313006747
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "A8: round-robin expert placement, FP8",
+   "x": "scr-C1rr",
+   "base": "scr-C1",
+   "cross_job": false,
+   "ratios": {
+    "R/isl1024-c1.tpot_p50": 0.9631363868550996,
+    "R/isl1024-c32.output_tok_s": 1.0199891597334032,
+    "R/isl8192-c32.output_tok_s": 1.0357830010789624
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "Round-robin expert placement, NVFP4",
+   "x": "scr-Err",
+   "base": "scr-E",
+   "cross_job": false,
+   "ratios": {
+    "R/isl1024-c1.tpot_p50": 0.9964048420861017,
+    "R/isl1024-c32.output_tok_s": 1.0190276323819751,
+    "R/isl8192-c32.output_tok_s": 1.0244655609298656
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "DCP 2 on TP16",
+   "x": "scr-B0dcp",
+   "base": "scr-B0",
+   "cross_job": false,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "D x 2 against D",
+   "x": "scr-Dx2",
+   "base": "scr-Dx1",
+   "cross_job": false,
+   "ratios": {
+    "lambda_star.W1.standard": 2.038645803245052,
+    "R/isl8192-c32.output_tok_s": 2.1232994232691476
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D",
+   "x": "scr-PD",
+   "base": "scr-Dx1",
+   "cross_job": false,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D",
+   "x": "scr-PD@rerun-pd-1",
+   "base": "scr-Dx1",
+   "cross_job": true,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D",
+   "x": "scr-PD@rerun-pd-2",
+   "base": "scr-Dx1",
+   "cross_job": true,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D",
+   "x": "scr-PD@rerun-pd-3",
+   "base": "scr-Dx1",
+   "cross_job": true,
+   "ratios": {
+    "lambda_star.W1.standard": 1.9402931658904146,
+    "R/isl1024-c1.ttft_p50": 1.3778479145604152,
+    "R/isl8192-c1.ttft_p50": 1.1997358503885494,
+    "R/isl1024-c1.tpot_p50": 0.9984826235927559
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D x 2",
+   "x": "scr-PD",
+   "base": "scr-Dx2",
+   "cross_job": false,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D x 2",
+   "x": "scr-PD@rerun-pd-1",
+   "base": "scr-Dx2",
+   "cross_job": true,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D x 2",
+   "x": "scr-PD@rerun-pd-2",
+   "base": "scr-Dx2",
+   "cross_job": true,
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "PD against D x 2",
+   "x": "scr-PD@rerun-pd-3",
+   "base": "scr-Dx2",
+   "cross_job": true,
+   "ratios": {
+    "lambda_star.W1.standard": 0.9517558973716362
+   },
+   "note": "one launch each: an indication, not a statistically established difference"
+  }
+ ],
+ "launches": {
+  "scr-A": {
+   "phase": "scr-A",
+   "source": "screen-fp8",
+   "key": "scr-A",
+   "status": "passed",
+   "note": "",
+   "seconds": 2140,
+   "start": {
+    "phase": "scr-A",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 271,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    663104
+   ],
+   "kv_tokens_total": 663104,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 663104
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 18.4
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 122.6
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1704.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1845.2
+   },
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 344.549,
+    "R/isl1024-c1.ttft_p90": 401.892,
+    "R/isl1024-c1.tpot_p50": 20.597,
+    "R/isl1024-c1.tpot_p90": 20.598,
+    "R/isl1024-c1.e2e_p50": 21414.972,
+    "R/isl1024-c1.e2e_p90": 21469.371,
+    "R/isl1024-c1.itl_p50": 20.596,
+    "R/isl1024-c1.output_tok_s": 47.77347432565063,
+    "R/isl1024-c32.ttft_p50": 6192.166,
+    "R/isl1024-c32.ttft_p90": 8685.864,
+    "R/isl1024-c32.tpot_p50": 68.23,
+    "R/isl1024-c32.tpot_p90": 72.247,
+    "R/isl1024-c32.e2e_p50": 76054.839,
+    "R/isl1024-c32.e2e_p90": 78054.942,
+    "R/isl1024-c32.itl_p50": 65.966,
+    "R/isl1024-c32.output_tok_s": 430.65553806910606,
+    "R/isl32768-c1.ttft_p50": 8835.989,
+    "R/isl32768-c1.ttft_p90": 8867.771,
+    "R/isl32768-c1.tpot_p50": 22.568,
+    "R/isl32768-c1.tpot_p90": 22.576,
+    "R/isl32768-c1.e2e_p50": 31917.085,
+    "R/isl32768-c1.e2e_p90": 31959.635,
+    "R/isl32768-c1.itl_p50": 22.599,
+    "R/isl32768-c1.output_tok_s": 32.07131622720736,
+    "R/isl32768-c32.ttft_p50": 213055.447,
+    "R/isl32768-c32.ttft_p90": 374467.476,
+    "R/isl32768-c32.tpot_p50": 3155.147,
+    "R/isl32768-c32.tpot_p90": 3265.552,
+    "R/isl32768-c32.e2e_p50": 412595.893,
+    "R/isl32768-c32.e2e_p90": 415223.409,
+    "R/isl32768-c32.itl_p50": 2887.992,
+    "R/isl32768-c32.output_tok_s": 4.928040074323229,
+    "R/isl8192-c1.ttft_p50": 2464.329,
+    "R/isl8192-c1.ttft_p90": 2499.4,
+    "R/isl8192-c1.tpot_p50": 21.382,
+    "R/isl8192-c1.tpot_p90": 21.387,
+    "R/isl8192-c1.e2e_p50": 24340.252,
+    "R/isl8192-c1.e2e_p90": 24370.677,
+    "R/isl8192-c1.itl_p50": 21.389,
+    "R/isl8192-c1.output_tok_s": 42.05461490938875,
+    "R/isl8192-c32.ttft_p50": 9820.474,
+    "R/isl8192-c32.ttft_p90": 65361.914,
+    "R/isl8192-c32.tpot_p50": 139.466,
+    "R/isl8192-c32.tpot_p90": 139.577,
+    "R/isl8192-c32.e2e_p50": 152202.991,
+    "R/isl8192-c32.e2e_p90": 208146.21,
+    "R/isl8192-c32.itl_p50": 74.035,
+    "R/isl8192-c32.output_tok_s": 214.16054656302882,
+    "W1/p1.ttft_p50": 420.632,
+    "W1/p1.ttft_p90": 610.353,
+    "W1/p1.tpot_p50": 55.075,
+    "W1/p1.tpot_p90": 72.111,
+    "W1/p1.e2e_p50": 28580.576,
+    "W1/p1.e2e_p90": 37287.009,
+    "W1/p1.itl_p50": 47.732,
+    "W1/p1.output_tok_s": 295.367,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.191
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0031,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0988,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.051,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8408,
+     "peak_running": 17.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0139,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.4448,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.067,
+     "peak_running": 34.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-A-auto": {
+   "phase": "scr-A-auto",
+   "source": "screen-fp8",
+   "key": "scr-A-auto",
+   "status": "passed",
+   "note": "",
+   "seconds": 2071,
+   "start": {
+    "phase": "scr-A-auto",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": -1,
+    "max_model_len": 262144,
+    "length_fallback": null,
+    "seconds_to_healthy": 191,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 262144,
+   "kv_tokens": [
+    659776
+   ],
+   "kv_tokens_total": 659776,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 262144,
+     "kv_tokens_per_engine": {
+      "0": 659776
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 16.6
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 121.7
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1723.6
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1861.9
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.037436,
+    "p99_abs_logprob_diff": 0.763064,
+    "top1_agreement": 0.98632,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002257,
+      "top1_agreement": 0.99902
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.110443,
+      "top1_agreement": 0.95506
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.00744,
+      "top1_agreement": 0.99951
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.029603,
+      "top1_agreement": 0.9917
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 345.033,
+    "R/isl1024-c1.ttft_p90": 396.712,
+    "R/isl1024-c1.tpot_p50": 20.704,
+    "R/isl1024-c1.tpot_p90": 20.705,
+    "R/isl1024-c1.e2e_p50": 21525.334,
+    "R/isl1024-c1.e2e_p90": 21576.958,
+    "R/isl1024-c1.itl_p50": 20.702,
+    "R/isl1024-c1.output_tok_s": 47.532610598933694,
+    "R/isl1024-c32.ttft_p50": 5567.081,
+    "R/isl1024-c32.ttft_p90": 8693.23,
+    "R/isl1024-c32.tpot_p50": 73.825,
+    "R/isl1024-c32.tpot_p90": 77.212,
+    "R/isl1024-c32.e2e_p50": 81093.793,
+    "R/isl1024-c32.e2e_p90": 83097.718,
+    "R/isl1024-c32.itl_p50": 71.012,
+    "R/isl1024-c32.output_tok_s": 403.8743615017889,
+    "R/isl32768-c1.ttft_p50": 8861.821,
+    "R/isl32768-c1.ttft_p90": 8897.356,
+    "R/isl32768-c1.tpot_p50": 22.739,
+    "R/isl32768-c1.tpot_p90": 22.75,
+    "R/isl32768-c1.e2e_p50": 32109.438,
+    "R/isl32768-c1.e2e_p90": 32160.712,
+    "R/isl32768-c1.itl_p50": 22.78,
+    "R/isl32768-c1.output_tok_s": 31.877650065533693,
+    "R/isl32768-c32.ttft_p50": 213142.349,
+    "R/isl32768-c32.ttft_p90": 374655.333,
+    "R/isl32768-c32.tpot_p50": 3156.841,
+    "R/isl32768-c32.tpot_p90": 3267.269,
+    "R/isl32768-c32.e2e_p50": 412817.06,
+    "R/isl32768-c32.e2e_p90": 415564.336,
+    "R/isl32768-c32.itl_p50": 2891.357,
+    "R/isl32768-c32.output_tok_s": 4.923925711178306,
+    "R/isl8192-c1.ttft_p50": 2481.907,
+    "R/isl8192-c1.ttft_p90": 2513.013,
+    "R/isl8192-c1.tpot_p50": 21.485,
+    "R/isl8192-c1.tpot_p90": 21.492,
+    "R/isl8192-c1.e2e_p50": 24455.65,
+    "R/isl8192-c1.e2e_p90": 24496.085,
+    "R/isl8192-c1.itl_p50": 21.495,
+    "R/isl8192-c1.output_tok_s": 41.84822984476513,
+    "R/isl8192-c32.ttft_p50": 9833.396,
+    "R/isl8192-c32.ttft_p90": 65401.293,
+    "R/isl8192-c32.tpot_p50": 143.773,
+    "R/isl8192-c32.tpot_p90": 143.997,
+    "R/isl8192-c32.e2e_p50": 156976.191,
+    "R/isl8192-c32.e2e_p90": 212602.992,
+    "R/isl8192-c32.itl_p50": 78.696,
+    "R/isl8192-c32.output_tok_s": 207.71279723685274,
+    "W1/p1.ttft_p50": 425.969,
+    "W1/p1.ttft_p90": 663.786,
+    "W1/p1.tpot_p50": 60.263,
+    "W1/p1.tpot_p90": 78.095,
+    "W1/p1.e2e_p50": 31203.819,
+    "W1/p1.e2e_p90": 40331.425,
+    "W1/p1.itl_p50": 51.186,
+    "W1/p1.output_tok_s": 292.813,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.118
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0031,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0993,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.0512,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8451,
+     "peak_running": 17.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.014,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.447,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.069,
+     "peak_running": 35.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C1": {
+   "phase": "scr-C1",
+   "source": "screen-fp8",
+   "key": "scr-C1",
+   "status": "passed",
+   "note": "",
+   "seconds": 2137,
+   "start": {
+    "phase": "scr-C1",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 150,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    661952
+   ],
+   "kv_tokens_total": 661952,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 661952
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 18.5
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 130.1
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1818.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1966.8
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.037633,
+    "p99_abs_logprob_diff": 0.813349,
+    "top1_agreement": 0.98705,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002325,
+      "top1_agreement": 0.99902
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.109088,
+      "top1_agreement": 0.95799
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008975,
+      "top1_agreement": 0.99902
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.030145,
+      "top1_agreement": 0.99218
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 378.397,
+    "R/isl1024-c1.ttft_p90": 432.304,
+    "R/isl1024-c1.tpot_p50": 23.492,
+    "R/isl1024-c1.tpot_p90": 23.497,
+    "R/isl1024-c1.e2e_p50": 24408.942,
+    "R/isl1024-c1.e2e_p90": 24467.893,
+    "R/isl1024-c1.itl_p50": 23.49,
+    "R/isl1024-c1.output_tok_s": 41.91851928415281,
+    "R/isl1024-c32.ttft_p50": 6808.93,
+    "R/isl1024-c32.ttft_p90": 9628.907,
+    "R/isl1024-c32.tpot_p50": 75.533,
+    "R/isl1024-c32.tpot_p90": 79.984,
+    "R/isl1024-c32.e2e_p50": 83810.72,
+    "R/isl1024-c32.e2e_p90": 85627.2,
+    "R/isl1024-c32.itl_p50": 72.449,
+    "R/isl1024-c32.output_tok_s": 390.7984379805558,
+    "R/isl32768-c1.ttft_p50": 9296.67,
+    "R/isl32768-c1.ttft_p90": 9322.341,
+    "R/isl32768-c1.tpot_p50": 25.442,
+    "R/isl32768-c1.tpot_p90": 25.451,
+    "R/isl32768-c1.e2e_p50": 35317.584,
+    "R/isl32768-c1.e2e_p90": 35354.558,
+    "R/isl32768-c1.itl_p50": 25.471,
+    "R/isl32768-c1.output_tok_s": 28.989677256933717,
+    "R/isl32768-c32.ttft_p50": 228984.724,
+    "R/isl32768-c32.ttft_p90": 402674.929,
+    "R/isl32768-c32.tpot_p50": 3394.686,
+    "R/isl32768-c32.tpot_p90": 3510.804,
+    "R/isl32768-c32.e2e_p50": 443701.322,
+    "R/isl32768-c32.e2e_p90": 446641.647,
+    "R/isl32768-c32.itl_p50": 3136.966,
+    "R/isl32768-c32.output_tok_s": 4.5811753856616875,
+    "R/isl8192-c1.ttft_p50": 2712.2,
+    "R/isl8192-c1.ttft_p90": 2752.402,
+    "R/isl8192-c1.tpot_p50": 24.253,
+    "R/isl8192-c1.tpot_p90": 24.261,
+    "R/isl8192-c1.e2e_p50": 27523.563,
+    "R/isl8192-c1.e2e_p90": 27563.835,
+    "R/isl8192-c1.itl_p50": 24.266,
+    "R/isl8192-c1.output_tok_s": 37.18654577533046,
+    "R/isl8192-c32.ttft_p50": 10796.655,
+    "R/isl8192-c32.ttft_p90": 71805.495,
+    "R/isl8192-c32.tpot_p50": 152.071,
+    "R/isl8192-c32.tpot_p90": 152.174,
+    "R/isl8192-c32.e2e_p50": 165646.636,
+    "R/isl8192-c32.e2e_p90": 227442.478,
+    "R/isl8192-c32.itl_p50": 79.583,
+    "R/isl8192-c32.output_tok_s": 196.70555789277088,
+    "W1/p1.ttft_p50": 471.756,
+    "W1/p1.ttft_p90": 765.951,
+    "W1/p1.tpot_p50": 68.159,
+    "W1/p1.tpot_p90": 86.655,
+    "W1/p1.e2e_p50": 35359.322,
+    "W1/p1.e2e_p90": 44738.219,
+    "W1/p1.itl_p50": 54.709,
+    "W1/p1.output_tok_s": 291.797,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0031,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.099,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.0511,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8423,
+     "peak_running": 17.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0139,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.4456,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0772,
+     "peak_running": 38.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C1rr": {
+   "phase": "scr-C1rr",
+   "source": "screen-fp8",
+   "key": "scr-C1rr",
+   "status": "passed",
+   "note": "",
+   "seconds": 2090,
+   "start": {
+    "phase": "scr-C1rr",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 151,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    660992
+   ],
+   "kv_tokens_total": 660992,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 660992
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.8
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 126.1
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1776.6
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1920.5
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.033843,
+    "p99_abs_logprob_diff": 0.659116,
+    "top1_agreement": 0.98705,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002945,
+      "top1_agreement": 0.99853
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.099484,
+      "top1_agreement": 0.9619
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008415,
+      "top1_agreement": 0.99805
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.024527,
+      "top1_agreement": 0.98974
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 366.914,
+    "R/isl1024-c1.ttft_p90": 425.636,
+    "R/isl1024-c1.tpot_p50": 22.626,
+    "R/isl1024-c1.tpot_p90": 22.634,
+    "R/isl1024-c1.e2e_p50": 23516.295,
+    "R/isl1024-c1.e2e_p90": 23577.03,
+    "R/isl1024-c1.itl_p50": 22.628,
+    "R/isl1024-c1.output_tok_s": 43.51289801950517,
+    "R/isl1024-c32.ttft_p50": 6501.797,
+    "R/isl1024-c32.ttft_p90": 9209.244,
+    "R/isl1024-c32.tpot_p50": 74.091,
+    "R/isl1024-c32.tpot_p90": 78.331,
+    "R/isl1024-c32.e2e_p50": 82167.19,
+    "R/isl1024-c32.e2e_p90": 84039.214,
+    "R/isl1024-c32.itl_p50": 71.566,
+    "R/isl1024-c32.output_tok_s": 398.61017038091353,
+    "R/isl32768-c1.ttft_p50": 9129.07,
+    "R/isl32768-c1.ttft_p90": 9148.924,
+    "R/isl32768-c1.tpot_p50": 24.583,
+    "R/isl32768-c1.tpot_p90": 24.589,
+    "R/isl32768-c1.e2e_p50": 34270.926,
+    "R/isl32768-c1.e2e_p90": 34290.756,
+    "R/isl32768-c1.itl_p50": 24.612,
+    "R/isl32768-c1.output_tok_s": 29.877846423634573,
+    "R/isl32768-c32.ttft_p50": 221953.843,
+    "R/isl32768-c32.ttft_p90": 390093.41,
+    "R/isl32768-c32.tpot_p50": 3287.58,
+    "R/isl32768-c32.tpot_p90": 3400.746,
+    "R/isl32768-c32.e2e_p50": 429846.751,
+    "R/isl32768-c32.e2e_p90": 432706.966,
+    "R/isl32768-c32.itl_p50": 3025.532,
+    "R/isl32768-c32.output_tok_s": 4.72871296405672,
+    "R/isl8192-c1.ttft_p50": 2610.429,
+    "R/isl8192-c1.ttft_p90": 2646.889,
+    "R/isl8192-c1.tpot_p50": 23.383,
+    "R/isl8192-c1.tpot_p90": 23.389,
+    "R/isl8192-c1.e2e_p50": 26530.305,
+    "R/isl8192-c1.e2e_p90": 26565.8,
+    "R/isl8192-c1.itl_p50": 23.392,
+    "R/isl8192-c1.output_tok_s": 38.58164054686089,
+    "R/isl8192-c32.ttft_p50": 10356.9,
+    "R/isl8192-c32.ttft_p90": 68919.114,
+    "R/isl8192-c32.tpot_p50": 146.392,
+    "R/isl8192-c32.tpot_p90": 146.496,
+    "R/isl8192-c32.e2e_p50": 159916.21,
+    "R/isl8192-c32.e2e_p90": 218763.418,
+    "R/isl8192-c32.itl_p50": 77.586,
+    "R/isl8192-c32.output_tok_s": 203.7442730830858,
+    "W1/p1.ttft_p50": 454.883,
+    "W1/p1.ttft_p90": 714.963,
+    "W1/p1.tpot_p50": 64.753,
+    "W1/p1.tpot_p90": 81.363,
+    "W1/p1.e2e_p50": 33688.463,
+    "W1/p1.e2e_p90": 42082.805,
+    "W1/p1.itl_p50": 53.218,
+    "W1/p1.output_tok_s": 292.597,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0112
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0031,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0992,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.0511,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8435,
+     "peak_running": 17.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0139,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.4462,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0713,
+     "peak_running": 36.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-B0": {
+   "phase": "scr-B0",
+   "source": "screen-fp8",
+   "key": "scr-B0",
+   "status": "passed",
+   "note": "",
+   "seconds": 2227,
+   "start": {
+    "phase": "scr-B0",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 311,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    292352
+   ],
+   "kv_tokens_total": 292352,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 292352
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 19.0
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 116.4
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1758.4
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1893.8
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035575,
+    "p99_abs_logprob_diff": 0.711699,
+    "top1_agreement": 0.98693,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.001627,
+      "top1_agreement": 1.0
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.104324,
+      "top1_agreement": 0.95848
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.007442,
+      "top1_agreement": 0.99902
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.028909,
+      "top1_agreement": 0.99023
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 9,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 355.465,
+    "R/isl1024-c1.ttft_p90": 396.989,
+    "R/isl1024-c1.tpot_p50": 25.699,
+    "R/isl1024-c1.tpot_p90": 25.706,
+    "R/isl1024-c1.e2e_p50": 26650.811,
+    "R/isl1024-c1.e2e_p90": 26680.492,
+    "R/isl1024-c1.itl_p50": 25.695,
+    "R/isl1024-c1.output_tok_s": 38.417303914706366,
+    "R/isl1024-c32.ttft_p50": 5718.804,
+    "R/isl1024-c32.ttft_p90": 8083.702,
+    "R/isl1024-c32.tpot_p50": 66.192,
+    "R/isl1024-c32.tpot_p90": 69.924,
+    "R/isl1024-c32.e2e_p50": 73618.84,
+    "R/isl1024-c32.e2e_p90": 75698.45,
+    "R/isl1024-c32.itl_p50": 64.254,
+    "R/isl1024-c32.output_tok_s": 444.46760696516856,
+    "R/isl32768-c1.ttft_p50": 12632.802,
+    "R/isl32768-c1.ttft_p90": 12667.599,
+    "R/isl32768-c1.tpot_p50": 27.654,
+    "R/isl32768-c1.tpot_p90": 27.657,
+    "R/isl32768-c1.e2e_p50": 40925.067,
+    "R/isl32768-c1.e2e_p90": 40957.385,
+    "R/isl32768-c1.itl_p50": 27.677,
+    "R/isl32768-c1.output_tok_s": 25.02175008922066,
+    "R/isl32768-c32.ttft_p50": 208929.78,
+    "R/isl32768-c32.ttft_p90": 368573.327,
+    "R/isl32768-c32.tpot_p50": 1315.885,
+    "R/isl32768-c32.tpot_p90": 1408.945,
+    "R/isl32768-c32.e2e_p50": 295945.977,
+    "R/isl32768-c32.e2e_p90": 407313.959,
+    "R/isl32768-c32.itl_p50": 44.931,
+    "R/isl32768-c32.output_tok_s": 5.022963736498004,
+    "R/isl8192-c1.ttft_p50": 2344.176,
+    "R/isl8192-c1.ttft_p90": 2390.721,
+    "R/isl8192-c1.tpot_p50": 26.468,
+    "R/isl8192-c1.tpot_p90": 26.47,
+    "R/isl8192-c1.e2e_p50": 29422.235,
+    "R/isl8192-c1.e2e_p90": 29468.257,
+    "R/isl8192-c1.itl_p50": 26.469,
+    "R/isl8192-c1.output_tok_s": 34.789788047011754,
+    "R/isl8192-c32.ttft_p50": 9283.958,
+    "R/isl8192-c32.ttft_p90": 61784.722,
+    "R/isl8192-c32.tpot_p50": 133.371,
+    "R/isl8192-c32.tpot_p90": 133.477,
+    "R/isl8192-c32.e2e_p50": 145627.286,
+    "R/isl8192-c32.e2e_p90": 198317.998,
+    "R/isl8192-c32.itl_p50": 70.832,
+    "R/isl8192-c32.output_tok_s": 219.7607853026262,
+    "W1/p1.ttft_p50": 405.031,
+    "W1/p1.ttft_p90": 587.221,
+    "W1/p1.tpot_p50": 53.642,
+    "W1/p1.tpot_p90": 69.281,
+    "W1/p1.e2e_p50": 27807.048,
+    "W1/p1.e2e_p90": 35790.751,
+    "W1/p1.itl_p50": 46.197,
+    "W1/p1.output_tok_s": 296.633,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.1854
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.007,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.2242,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.1156,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8986,
+     "peak_running": 8.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0315,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9998,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1515,
+     "peak_running": 34.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C2": {
+   "phase": "scr-C2",
+   "source": "screen-fp8",
+   "key": "scr-C2",
+   "status": "passed",
+   "note": "",
+   "seconds": 2165,
+   "start": {
+    "phase": "scr-C2",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 231,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    218432,
+    218432
+   ],
+   "kv_tokens_total": 436864,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 436864,
+      "1": 436864
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 28.1
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 91.6
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1792.8
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1912.6
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035905,
+    "p99_abs_logprob_diff": 0.728958,
+    "top1_agreement": 0.98718,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002264,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.107943,
+      "top1_agreement": 0.95896
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.006365,
+      "top1_agreement": 0.99853
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.027049,
+      "top1_agreement": 0.9917
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 7,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 514.547,
+    "R/isl1024-c1.ttft_p90": 515.428,
+    "R/isl1024-c1.tpot_p50": 41.22,
+    "R/isl1024-c1.tpot_p90": 41.322,
+    "R/isl1024-c1.e2e_p50": 42674.836,
+    "R/isl1024-c1.e2e_p90": 42780.966,
+    "R/isl1024-c1.itl_p50": 41.193,
+    "R/isl1024-c1.output_tok_s": 24.003539162028964,
+    "R/isl1024-c32.ttft_p50": 4971.408,
+    "R/isl1024-c32.ttft_p90": 7491.77,
+    "R/isl1024-c32.tpot_p50": 64.251,
+    "R/isl1024-c32.tpot_p90": 68.409,
+    "R/isl1024-c32.e2e_p50": 69137.981,
+    "R/isl1024-c32.e2e_p90": 73195.698,
+    "R/isl1024-c32.itl_p50": 60.342,
+    "R/isl1024-c32.output_tok_s": 473.92158572081746,
+    "R/isl32768-c1.ttft_p50": 13870.181,
+    "R/isl32768-c1.ttft_p90": 13924.651,
+    "R/isl32768-c1.tpot_p50": 42.843,
+    "R/isl32768-c1.tpot_p90": 42.865,
+    "R/isl32768-c1.e2e_p50": 57716.218,
+    "R/isl32768-c1.e2e_p90": 57731.213,
+    "R/isl32768-c1.itl_p50": 42.857,
+    "R/isl32768-c1.output_tok_s": 17.74457071837016,
+    "R/isl32768-c32.ttft_p50": 166194.854,
+    "R/isl32768-c32.ttft_p90": 286120.433,
+    "R/isl32768-c32.tpot_p50": 1423.426,
+    "R/isl32768-c32.tpot_p90": 1471.366,
+    "R/isl32768-c32.e2e_p50": 256692.01,
+    "R/isl32768-c32.e2e_p90": 311511.57,
+    "R/isl32768-c32.itl_p50": 56.705,
+    "R/isl32768-c32.output_tok_s": 6.567746624512178,
+    "R/isl8192-c1.ttft_p50": 2701.713,
+    "R/isl8192-c1.ttft_p90": 2726.699,
+    "R/isl8192-c1.tpot_p50": 41.686,
+    "R/isl8192-c1.tpot_p90": 41.78,
+    "R/isl8192-c1.e2e_p50": 45366.362,
+    "R/isl8192-c1.e2e_p90": 45443.379,
+    "R/isl8192-c1.itl_p50": 41.677,
+    "R/isl8192-c1.output_tok_s": 22.57990362837091,
+    "R/isl8192-c32.ttft_p50": 17437.654,
+    "R/isl8192-c32.ttft_p90": 45012.541,
+    "R/isl8192-c32.tpot_p50": 95.257,
+    "R/isl8192-c32.tpot_p90": 107.287,
+    "R/isl8192-c32.e2e_p50": 118547.135,
+    "R/isl8192-c32.e2e_p90": 141986.194,
+    "R/isl8192-c32.itl_p50": 65.004,
+    "R/isl8192-c32.output_tok_s": 275.5389323064178,
+    "W1/p1.ttft_p50": 503.065,
+    "W1/p1.ttft_p90": 709.942,
+    "W1/p1.tpot_p50": 71.465,
+    "W1/p1.tpot_p90": 79.42,
+    "W1/p1.e2e_p50": 37035.106,
+    "W1/p1.e2e_p90": 41075.832,
+    "W1/p1.itl_p50": 57.66,
+    "W1/p1.output_tok_s": 298.067,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0094,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.1594,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.1547,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.9021,
+     "peak_running": 12.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0422,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.7175,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1105,
+     "peak_running": 36.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C4": {
+   "phase": "scr-C4",
+   "source": "screen-fp8",
+   "key": "scr-C4",
+   "status": "failed",
+   "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "seconds": 72,
+   "start": {
+    "phase": "scr-C4",
+    "started": false,
+    "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "all engines",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C8": {
+   "phase": "scr-C8",
+   "source": "screen-fp8",
+   "key": "scr-C8",
+   "status": "failed",
+   "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "seconds": 71,
+   "start": {
+    "phase": "scr-C8",
+    "started": false,
+    "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "all engines",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-A4": {
+   "phase": "scr-A4",
+   "source": "screen-fp8",
+   "key": "scr-A4",
+   "status": "passed",
+   "note": "",
+   "seconds": 2276,
+   "start": {
+    "phase": "scr-A4",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 192,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    1187136
+   ],
+   "kv_tokens_total": 1187136,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 1187136
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 21.0
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 139.2
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1904.6
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 2064.8
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035168,
+    "p99_abs_logprob_diff": 0.665279,
+    "top1_agreement": 0.98437,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002188,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.105725,
+      "top1_agreement": 0.94822
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.007409,
+      "top1_agreement": 0.99951
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.025351,
+      "top1_agreement": 0.99023
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 452.739,
+    "R/isl1024-c1.ttft_p90": 491.797,
+    "R/isl1024-c1.tpot_p50": 22.754,
+    "R/isl1024-c1.tpot_p90": 22.761,
+    "R/isl1024-c1.e2e_p50": 23728.846,
+    "R/isl1024-c1.e2e_p90": 23776.022,
+    "R/isl1024-c1.itl_p50": 22.757,
+    "R/isl1024-c1.output_tok_s": 43.12362129617483,
+    "R/isl1024-c32.ttft_p50": 7491.949,
+    "R/isl1024-c32.ttft_p90": 10466.912,
+    "R/isl1024-c32.tpot_p50": 87.388,
+    "R/isl1024-c32.tpot_p90": 92.19,
+    "R/isl1024-c32.e2e_p50": 96707.858,
+    "R/isl1024-c32.e2e_p90": 97257.772,
+    "R/isl1024-c32.itl_p50": 84.474,
+    "R/isl1024-c32.output_tok_s": 338.70682168086006,
+    "R/isl32768-c1.ttft_p50": 7281.755,
+    "R/isl32768-c1.ttft_p90": 7320.363,
+    "R/isl32768-c1.tpot_p50": 24.705,
+    "R/isl32768-c1.tpot_p90": 24.707,
+    "R/isl32768-c1.e2e_p50": 32549.838,
+    "R/isl32768-c1.e2e_p90": 32589.602,
+    "R/isl32768-c1.itl_p50": 24.732,
+    "R/isl32768-c1.output_tok_s": 31.44821675338763,
+    "R/isl32768-c32.ttft_p50": 239218.585,
+    "R/isl32768-c32.ttft_p90": 422461.741,
+    "R/isl32768-c32.tpot_p50": 3551.635,
+    "R/isl32768-c32.tpot_p90": 3705.911,
+    "R/isl32768-c32.e2e_p50": 465696.203,
+    "R/isl32768-c32.e2e_p90": 469002.934,
+    "R/isl32768-c32.itl_p50": 3331.802,
+    "R/isl32768-c32.output_tok_s": 4.362759846875748,
+    "R/isl8192-c1.ttft_p50": 2902.124,
+    "R/isl8192-c1.ttft_p90": 2938.69,
+    "R/isl8192-c1.tpot_p50": 23.522,
+    "R/isl8192-c1.tpot_p90": 23.523,
+    "R/isl8192-c1.e2e_p50": 26965.964,
+    "R/isl8192-c1.e2e_p90": 27000.561,
+    "R/isl8192-c1.itl_p50": 23.529,
+    "R/isl8192-c1.output_tok_s": 37.958492005033484,
+    "R/isl8192-c32.ttft_p50": 17355.91,
+    "R/isl8192-c32.ttft_p90": 77106.773,
+    "R/isl8192-c32.tpot_p50": 164.167,
+    "R/isl8192-c32.tpot_p90": 168.67,
+    "R/isl8192-c32.e2e_p50": 184802.5,
+    "R/isl8192-c32.e2e_p90": 245124.538,
+    "R/isl8192-c32.itl_p50": 92.615,
+    "R/isl8192-c32.output_tok_s": 176.13091283854993,
+    "W1/p1.ttft_p50": 774.681,
+    "W1/p1.ttft_p90": 1114.658,
+    "W1/p1.tpot_p50": 112.443,
+    "W1/p1.tpot_p90": 121.786,
+    "W1/p1.e2e_p50": 58336.383,
+    "W1/p1.e2e_p90": 62994.204,
+    "W1/p1.itl_p50": 93.706,
+    "W1/p1.output_tok_s": 288.913,
+    "W1/p1.goodput.standard": 0.2865,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0018,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0552,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.0285,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.4836,
+     "peak_running": 18.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0078,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.2484,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0515,
+     "peak_running": 47.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C16": {
+   "phase": "scr-C16",
+   "source": "screen-fp8",
+   "key": "scr-C16",
+   "status": "failed",
+   "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "seconds": 71,
+   "start": {
+    "phase": "scr-C16",
+    "started": false,
+    "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "all engines",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-B0dcp": {
+   "phase": "scr-B0dcp",
+   "source": "screen-fp8",
+   "key": "scr-B0dcp",
+   "status": "failed",
+   "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "seconds": 224,
+   "start": {
+    "phase": "scr-B0dcp",
+    "started": false,
+    "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "all engines",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-D": {
+   "phase": "scr-D",
+   "source": "screen-nvfp4",
+   "key": "scr-D",
+   "status": "passed",
+   "note": "",
+   "seconds": 2346,
+   "start": {
+    "phase": "scr-D",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 433,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152
+   ],
+   "kv_tokens_total": 233152,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.2
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 123.7
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1749.0
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1889.9
+   },
+   "parity": null,
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 341.248,
+    "R/isl1024-c1.ttft_p90": 391.321,
+    "R/isl1024-c1.tpot_p50": 20.221,
+    "R/isl1024-c1.tpot_p90": 20.223,
+    "R/isl1024-c1.e2e_p50": 21028.966,
+    "R/isl1024-c1.e2e_p90": 21077.576,
+    "R/isl1024-c1.itl_p50": 20.222,
+    "R/isl1024-c1.output_tok_s": 48.65665651727071,
+    "R/isl1024-c32.ttft_p50": 6073.509,
+    "R/isl1024-c32.ttft_p90": 8603.896,
+    "R/isl1024-c32.tpot_p50": 60.936,
+    "R/isl1024-c32.tpot_p90": 64.934,
+    "R/isl1024-c32.e2e_p50": 68515.652,
+    "R/isl1024-c32.e2e_p90": 70481.478,
+    "R/isl1024-c32.itl_p50": 58.659,
+    "R/isl1024-c32.output_tok_s": 478.0354353173383,
+    "R/isl32768-c1.ttft_p50": 13103.248,
+    "R/isl32768-c1.ttft_p90": 13138.925,
+    "R/isl32768-c1.tpot_p50": 22.198,
+    "R/isl32768-c1.tpot_p90": 22.204,
+    "R/isl32768-c1.e2e_p50": 35811.519,
+    "R/isl32768-c1.e2e_p90": 35840.953,
+    "R/isl32768-c1.itl_p50": 22.231,
+    "R/isl32768-c1.output_tok_s": 28.593411191138024,
+    "R/isl32768-c32.ttft_p50": 219036.007,
+    "R/isl32768-c32.ttft_p90": 380100.574,
+    "R/isl32768-c32.tpot_p50": 1153.643,
+    "R/isl32768-c32.tpot_p90": 1249.402,
+    "R/isl32768-c32.e2e_p50": 293700.738,
+    "R/isl32768-c32.e2e_p90": 421771.616,
+    "R/isl32768-c32.itl_p50": 35.062,
+    "R/isl32768-c32.output_tok_s": 4.84993208166326,
+    "R/isl8192-c1.ttft_p50": 2438.548,
+    "R/isl8192-c1.ttft_p90": 2483.68,
+    "R/isl8192-c1.tpot_p50": 20.982,
+    "R/isl8192-c1.tpot_p90": 20.983,
+    "R/isl8192-c1.e2e_p50": 23904.068,
+    "R/isl8192-c1.e2e_p90": 23948.362,
+    "R/isl8192-c1.itl_p50": 20.99,
+    "R/isl8192-c1.output_tok_s": 42.81080960571736,
+    "R/isl8192-c32.ttft_p50": 24346.382,
+    "R/isl8192-c32.ttft_p90": 94070.771,
+    "R/isl8192-c32.tpot_p50": 120.504,
+    "R/isl8192-c32.tpot_p90": 122.332,
+    "R/isl8192-c32.e2e_p50": 147586.522,
+    "R/isl8192-c32.e2e_p90": 208293.576,
+    "R/isl8192-c32.itl_p50": 64.681,
+    "R/isl8192-c32.output_tok_s": 193.67940694829292,
+    "W1/p1.ttft_p50": 407.328,
+    "W1/p1.ttft_p90": 591.324,
+    "W1/p1.tpot_p50": 45.554,
+    "W1/p1.tpot_p90": 61.958,
+    "W1/p1.e2e_p50": 23676.838,
+    "W1/p1.e2e_p90": 32071.508,
+    "W1/p1.itl_p50": 37.198,
+    "W1/p1.output_tok_s": 298.67,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.8202
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0088,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.2812,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.145,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.986,
+     "peak_running": 7.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0395,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9997,
+     "peak_running": 28.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1691,
+     "peak_running": 30.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-E": {
+   "phase": "scr-E",
+   "source": "screen-nvfp4",
+   "key": "scr-E",
+   "status": "passed",
+   "note": "",
+   "seconds": 2309,
+   "start": {
+    "phase": "scr-E",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 312,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    234112
+   ],
+   "kv_tokens_total": 234112,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 234112
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.3
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 131.2
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1834.5
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1983.0
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.036323,
+    "p99_abs_logprob_diff": 0.764504,
+    "top1_agreement": 0.98571,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.00275,
+      "top1_agreement": 0.99853
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.0998,
+      "top1_agreement": 0.95848
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008731,
+      "top1_agreement": 0.99805
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.034011,
+      "top1_agreement": 0.98779
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 2,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": 62
+    }
+   },
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 369.67,
+    "R/isl1024-c1.ttft_p90": 410.952,
+    "R/isl1024-c1.tpot_p50": 21.974,
+    "R/isl1024-c1.tpot_p90": 21.975,
+    "R/isl1024-c1.e2e_p50": 22848.241,
+    "R/isl1024-c1.e2e_p90": 22889.293,
+    "R/isl1024-c1.itl_p50": 21.973,
+    "R/isl1024-c1.output_tok_s": 44.78877785286911,
+    "R/isl1024-c32.ttft_p50": 6700.726,
+    "R/isl1024-c32.ttft_p90": 9492.509,
+    "R/isl1024-c32.tpot_p50": 65.002,
+    "R/isl1024-c32.tpot_p90": 69.411,
+    "R/isl1024-c32.e2e_p50": 73400.872,
+    "R/isl1024-c32.e2e_p90": 75787.487,
+    "R/isl1024-c32.itl_p50": 62.739,
+    "R/isl1024-c32.output_tok_s": 445.8248174538059,
+    "R/isl32768-c1.ttft_p50": 14018.507,
+    "R/isl32768-c1.ttft_p90": 14038.276,
+    "R/isl32768-c1.tpot_p50": 23.965,
+    "R/isl32768-c1.tpot_p90": 23.969,
+    "R/isl32768-c1.e2e_p50": 38534.015,
+    "R/isl32768-c1.e2e_p90": 38554.376,
+    "R/isl32768-c1.itl_p50": 23.995,
+    "R/isl32768-c1.output_tok_s": 26.58295041357029,
+    "R/isl32768-c32.ttft_p50": 234701.35,
+    "R/isl32768-c32.ttft_p90": 407098.429,
+    "R/isl32768-c32.tpot_p50": 1235.445,
+    "R/isl32768-c32.tpot_p90": 1339.028,
+    "R/isl32768-c32.e2e_p50": 314635.243,
+    "R/isl32768-c32.e2e_p90": 451724.837,
+    "R/isl32768-c32.itl_p50": 37.82,
+    "R/isl32768-c32.output_tok_s": 4.528342211039038,
+    "R/isl8192-c1.ttft_p50": 2682.527,
+    "R/isl8192-c1.ttft_p90": 2727.961,
+    "R/isl8192-c1.tpot_p50": 22.74,
+    "R/isl8192-c1.tpot_p90": 22.744,
+    "R/isl8192-c1.e2e_p50": 25945.86,
+    "R/isl8192-c1.e2e_p90": 25988.583,
+    "R/isl8192-c1.itl_p50": 22.749,
+    "R/isl8192-c1.output_tok_s": 39.449747533056964,
+    "R/isl8192-c32.ttft_p50": 26613.336,
+    "R/isl8192-c32.ttft_p90": 98919.35,
+    "R/isl8192-c32.tpot_p50": 127.918,
+    "R/isl8192-c32.tpot_p90": 131.195,
+    "R/isl8192-c32.e2e_p50": 157400.035,
+    "R/isl8192-c32.e2e_p90": 224043.402,
+    "R/isl8192-c32.itl_p50": 68.395,
+    "R/isl8192-c32.output_tok_s": 180.84079914274815,
+    "W1/p1.ttft_p50": 441.694,
+    "W1/p1.ttft_p90": 703.947,
+    "W1/p1.tpot_p50": 51.974,
+    "W1/p1.tpot_p90": 69.375,
+    "W1/p1.e2e_p50": 27024.515,
+    "W1/p1.e2e_p90": 35899.605,
+    "W1/p1.itl_p50": 41.086,
+    "W1/p1.output_tok_s": 296.273,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.309
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0088,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.28,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.1444,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.982,
+     "peak_running": 7.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0394,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9995,
+     "peak_running": 28.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1843,
+     "peak_running": 33.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-Err": {
+   "phase": "scr-Err",
+   "source": "screen-nvfp4",
+   "key": "scr-Err",
+   "status": "passed",
+   "note": "",
+   "seconds": 2267,
+   "start": {
+    "phase": "scr-Err",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 301,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    234112
+   ],
+   "kv_tokens_total": 234112,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 234112
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 16.5
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 127.3
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1807.1
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1951.0
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035702,
+    "p99_abs_logprob_diff": 0.781456,
+    "top1_agreement": 0.98693,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002291,
+      "top1_agreement": 0.99902
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.105785,
+      "top1_agreement": 0.96043
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.007395,
+      "top1_agreement": 0.99756
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.02734,
+      "top1_agreement": 0.99072
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 357.168,
+    "R/isl1024-c1.ttft_p90": 405.435,
+    "R/isl1024-c1.tpot_p50": 21.895,
+    "R/isl1024-c1.tpot_p90": 21.898,
+    "R/isl1024-c1.e2e_p50": 22755.809,
+    "R/isl1024-c1.e2e_p90": 22806.366,
+    "R/isl1024-c1.itl_p50": 21.897,
+    "R/isl1024-c1.output_tok_s": 44.96662497041806,
+    "R/isl1024-c32.ttft_p50": 6393.046,
+    "R/isl1024-c32.ttft_p90": 9050.992,
+    "R/isl1024-c32.tpot_p50": 64.145,
+    "R/isl1024-c32.tpot_p90": 68.352,
+    "R/isl1024-c32.e2e_p50": 72094.2,
+    "R/isl1024-c32.e2e_p90": 74129.771,
+    "R/isl1024-c32.itl_p50": 61.705,
+    "R/isl1024-c32.output_tok_s": 454.30780818707814,
+    "R/isl32768-c1.ttft_p50": 13592.277,
+    "R/isl32768-c1.ttft_p90": 13628.357,
+    "R/isl32768-c1.tpot_p50": 23.872,
+    "R/isl32768-c1.tpot_p90": 23.884,
+    "R/isl32768-c1.e2e_p50": 38012.236,
+    "R/isl32768-c1.e2e_p90": 38042.994,
+    "R/isl32768-c1.itl_p50": 23.91,
+    "R/isl32768-c1.output_tok_s": 26.93829144146574,
+    "R/isl32768-c32.ttft_p50": 227426.194,
+    "R/isl32768-c32.ttft_p90": 394431.759,
+    "R/isl32768-c32.tpot_p50": 1197.596,
+    "R/isl32768-c32.tpot_p90": 1297.444,
+    "R/isl32768-c32.e2e_p50": 304823.987,
+    "R/isl32768-c32.e2e_p90": 437679.275,
+    "R/isl32768-c32.itl_p50": 37.154,
+    "R/isl32768-c32.output_tok_s": 4.673682664815125,
+    "R/isl8192-c1.ttft_p50": 2565.903,
+    "R/isl8192-c1.ttft_p90": 2608.825,
+    "R/isl8192-c1.tpot_p50": 22.649,
+    "R/isl8192-c1.tpot_p90": 22.651,
+    "R/isl8192-c1.e2e_p50": 25735.935,
+    "R/isl8192-c1.e2e_p90": 25772.557,
+    "R/isl8192-c1.itl_p50": 22.654,
+    "R/isl8192-c1.output_tok_s": 39.772278780280445,
+    "R/isl8192-c32.ttft_p50": 25545.444,
+    "R/isl8192-c32.ttft_p90": 97439.167,
+    "R/isl8192-c32.tpot_p50": 125.209,
+    "R/isl8192-c32.tpot_p90": 128.037,
+    "R/isl8192-c32.e2e_p50": 153584.352,
+    "R/isl8192-c32.e2e_p90": 217511.203,
+    "R/isl8192-c32.itl_p50": 68.027,
+    "R/isl8192-c32.output_tok_s": 185.26517073278063,
+    "W1/p1.ttft_p50": 426.002,
+    "W1/p1.ttft_p90": 665.159,
+    "W1/p1.tpot_p50": 50.021,
+    "W1/p1.tpot_p90": 67.094,
+    "W1/p1.e2e_p50": 26001.976,
+    "W1/p1.e2e_p90": 34707.193,
+    "W1/p1.itl_p50": 39.824,
+    "W1/p1.output_tok_s": 296.467,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.4944
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0088,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.28,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.1444,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.982,
+     "peak_running": 7.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0394,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9992,
+     "peak_running": 28.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1788,
+     "peak_running": 32.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-D24": {
+   "phase": "scr-D24",
+   "source": "screen-nvfp4",
+   "key": "scr-D24",
+   "status": "passed",
+   "note": "",
+   "seconds": 2182,
+   "start": {
+    "phase": "scr-D24",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 312,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    137728,
+    137728
+   ],
+   "kv_tokens_total": 275456,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 275456,
+      "1": 275456
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 23.1
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 101.2
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1731.0
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1855.3
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.034771,
+    "p99_abs_logprob_diff": 0.726181,
+    "top1_agreement": 0.98632,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002002,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.098767,
+      "top1_agreement": 0.9575
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008596,
+      "top1_agreement": 0.99853
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.029718,
+      "top1_agreement": 0.98974
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 1,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": 112,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": 62
+    }
+   },
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 498.691,
+    "R/isl1024-c1.ttft_p90": 510.061,
+    "R/isl1024-c1.tpot_p50": 31.195,
+    "R/isl1024-c1.tpot_p90": 31.41,
+    "R/isl1024-c1.e2e_p50": 32410.809,
+    "R/isl1024-c1.e2e_p90": 32642.537,
+    "R/isl1024-c1.itl_p50": 31.201,
+    "R/isl1024-c1.output_tok_s": 31.56267727752298,
+    "R/isl1024-c32.ttft_p50": 5506.205,
+    "R/isl1024-c32.ttft_p90": 8250.852,
+    "R/isl1024-c32.tpot_p50": 57.238,
+    "R/isl1024-c32.tpot_p90": 60.431,
+    "R/isl1024-c32.e2e_p50": 62294.149,
+    "R/isl1024-c32.e2e_p90": 65453.221,
+    "R/isl1024-c32.itl_p50": 53.142,
+    "R/isl1024-c32.output_tok_s": 525.9935936689548,
+    "R/isl32768-c1.ttft_p50": 14736.767,
+    "R/isl32768-c1.ttft_p90": 14775.564,
+    "R/isl32768-c1.tpot_p50": 33.408,
+    "R/isl32768-c1.tpot_p90": 33.412,
+    "R/isl32768-c1.e2e_p50": 48909.258,
+    "R/isl32768-c1.e2e_p90": 48955.096,
+    "R/isl32768-c1.itl_p50": 33.44,
+    "R/isl32768-c1.output_tok_s": 20.93548864124772,
+    "R/isl32768-c32.ttft_p50": 180111.362,
+    "R/isl32768-c32.ttft_p90": 319160.529,
+    "R/isl32768-c32.tpot_p50": 940.221,
+    "R/isl32768-c32.tpot_p90": 1057.416,
+    "R/isl32768-c32.e2e_p50": 245612.456,
+    "R/isl32768-c32.e2e_p90": 345599.591,
+    "R/isl32768-c32.itl_p50": 39.667,
+    "R/isl32768-c32.output_tok_s": 5.921604573048347,
+    "R/isl8192-c1.ttft_p50": 2930.47,
+    "R/isl8192-c1.ttft_p90": 2944.755,
+    "R/isl8192-c1.tpot_p50": 32.288,
+    "R/isl8192-c1.tpot_p90": 32.295,
+    "R/isl8192-c1.e2e_p50": 35959.374,
+    "R/isl8192-c1.e2e_p90": 35981.237,
+    "R/isl8192-c1.itl_p50": 32.302,
+    "R/isl8192-c1.output_tok_s": 28.476602970137527,
+    "R/isl8192-c32.ttft_p50": 13959.673,
+    "R/isl8192-c32.ttft_p90": 53221.039,
+    "R/isl8192-c32.tpot_p50": 100.129,
+    "R/isl8192-c32.tpot_p90": 103.134,
+    "R/isl8192-c32.e2e_p50": 114708.957,
+    "R/isl8192-c32.e2e_p90": 153252.093,
+    "R/isl8192-c32.itl_p50": 53.678,
+    "R/isl8192-c32.output_tok_s": 246.16173327230803,
+    "W1/p1.ttft_p50": 517.72,
+    "W1/p1.ttft_p90": 738.816,
+    "W1/p1.tpot_p50": 64.067,
+    "W1/p1.tpot_p90": 68.32,
+    "W1/p1.e2e_p50": 33266.479,
+    "W1/p1.e2e_p90": 35428.782,
+    "W1/p1.itl_p50": 51.065,
+    "W1/p1.output_tok_s": 301.137,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.1573
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0149,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.2529,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.2455,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.954,
+     "peak_running": 8.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0669,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 1.0,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1683,
+     "peak_running": 34.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-D42": {
+   "phase": "scr-D42",
+   "source": "screen-nvfp4",
+   "key": "scr-D42",
+   "status": "passed",
+   "note": "",
+   "seconds": 2284,
+   "start": {
+    "phase": "scr-D42",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 272,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    515648
+   ],
+   "kv_tokens_total": 515648,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 515648
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 19.5
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 139.6
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1839.1
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1998.2
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035073,
+    "p99_abs_logprob_diff": 0.759827,
+    "top1_agreement": 0.98779,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002835,
+      "top1_agreement": 0.99756
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.099408,
+      "top1_agreement": 0.96385
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.00867,
+      "top1_agreement": 0.99805
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.029379,
+      "top1_agreement": 0.9917
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 2,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": 112,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 416.611,
+    "R/isl1024-c1.ttft_p90": 474.045,
+    "R/isl1024-c1.tpot_p50": 22.195,
+    "R/isl1024-c1.tpot_p90": 22.199,
+    "R/isl1024-c1.e2e_p50": 23123.193,
+    "R/isl1024-c1.e2e_p90": 23177.079,
+    "R/isl1024-c1.itl_p50": 22.195,
+    "R/isl1024-c1.output_tok_s": 44.248694686489486,
+    "R/isl1024-c32.ttft_p50": 6710.349,
+    "R/isl1024-c32.ttft_p90": 10477.612,
+    "R/isl1024-c32.tpot_p50": 72.253,
+    "R/isl1024-c32.tpot_p90": 76.205,
+    "R/isl1024-c32.e2e_p50": 80575.612,
+    "R/isl1024-c32.e2e_p90": 83186.543,
+    "R/isl1024-c32.itl_p50": 68.766,
+    "R/isl1024-c32.output_tok_s": 406.2251737413346,
+    "R/isl32768-c1.ttft_p50": 9932.54,
+    "R/isl32768-c1.ttft_p90": 9965.083,
+    "R/isl32768-c1.tpot_p50": 24.12,
+    "R/isl32768-c1.tpot_p90": 24.126,
+    "R/isl32768-c1.e2e_p50": 34607.702,
+    "R/isl32768-c1.e2e_p90": 34638.143,
+    "R/isl32768-c1.itl_p50": 24.15,
+    "R/isl32768-c1.output_tok_s": 29.584336747537293,
+    "R/isl32768-c32.ttft_p50": 241439.485,
+    "R/isl32768-c32.ttft_p90": 426354.87,
+    "R/isl32768-c32.tpot_p50": 3181.753,
+    "R/isl32768-c32.tpot_p90": 3248.019,
+    "R/isl32768-c32.e2e_p50": 447895.512,
+    "R/isl32768-c32.e2e_p90": 472255.839,
+    "R/isl32768-c32.itl_p50": 3352.004,
+    "R/isl32768-c32.output_tok_s": 4.331172238617083,
+    "R/isl8192-c1.ttft_p50": 2900.417,
+    "R/isl8192-c1.ttft_p90": 2942.677,
+    "R/isl8192-c1.tpot_p50": 22.922,
+    "R/isl8192-c1.tpot_p90": 22.925,
+    "R/isl8192-c1.e2e_p50": 26349.357,
+    "R/isl8192-c1.e2e_p90": 26388.514,
+    "R/isl8192-c1.itl_p50": 22.93,
+    "R/isl8192-c1.output_tok_s": 38.84228115186887,
+    "R/isl8192-c32.ttft_p50": 11594.472,
+    "R/isl8192-c32.ttft_p90": 77184.981,
+    "R/isl8192-c32.tpot_p50": 152.758,
+    "R/isl8192-c32.tpot_p90": 152.865,
+    "R/isl8192-c32.e2e_p50": 167548.319,
+    "R/isl8192-c32.e2e_p90": 233564.16,
+    "R/isl8192-c32.itl_p50": 75.162,
+    "R/isl8192-c32.output_tok_s": 194.56465615551576,
+    "W1/p1.ttft_p50": 501.771,
+    "W1/p1.ttft_p90": 827.964,
+    "W1/p1.tpot_p50": 63.212,
+    "W1/p1.tpot_p90": 81.868,
+    "W1/p1.e2e_p50": 32910.075,
+    "W1/p1.e2e_p90": 42423.355,
+    "W1/p1.itl_p50": 50.039,
+    "W1/p1.output_tok_s": 291.5,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0281
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.004,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.1271,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.0655,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.9551,
+     "peak_running": 15.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0179,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.572,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0935,
+     "peak_running": 36.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-D8": {
+   "phase": "scr-D8",
+   "source": "screen-nvfp4",
+   "key": "scr-D8",
+   "status": "passed",
+   "note": "relaunched with --max-model-len -1 (vLLM estimated 32896 tokens)",
+   "seconds": 2229,
+   "start": {
+    "phase": "scr-D8",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 31616,
+    "length_fallback": {
+     "requested": 131072,
+     "estimated": 32896
+    },
+    "seconds_to_healthy": 452,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 31616,
+   "kv_tokens": [
+    31616,
+    31616,
+    31616,
+    31616,
+    31616,
+    31616,
+    31616,
+    31616
+   ],
+   "kv_tokens_total": 252928,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 31616,
+     "kv_tokens_per_engine": {
+      "0": 252928,
+      "1": 252928,
+      "2": 252928,
+      "3": 252928,
+      "4": 252928,
+      "5": 252928,
+      "6": 252928,
+      "7": 252928
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.1
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 28.5
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 91.8
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1326.3
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1446.6
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.037822,
+    "p99_abs_logprob_diff": 0.77153,
+    "top1_agreement": 0.98437,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002191,
+      "top1_agreement": 0.99902
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.104373,
+      "top1_agreement": 0.95261
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008054,
+      "top1_agreement": 0.99853
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.036673,
+      "top1_agreement": 0.9873
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 2,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": 62
+    }
+   },
+   "reference": "scr-D",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 876.376,
+    "R/isl1024-c1.ttft_p90": 877.364,
+    "R/isl1024-c1.tpot_p50": 37.349,
+    "R/isl1024-c1.tpot_p90": 37.356,
+    "R/isl1024-c1.e2e_p50": 39072.832,
+    "R/isl1024-c1.e2e_p90": 39092.633,
+    "R/isl1024-c1.itl_p50": 37.344,
+    "R/isl1024-c1.output_tok_s": 26.206324902461734,
+    "R/isl1024-c32.ttft_p50": 4846.46,
+    "R/isl1024-c32.ttft_p90": 6265.238,
+    "R/isl1024-c32.tpot_p50": 66.124,
+    "R/isl1024-c32.tpot_p90": 83.263,
+    "R/isl1024-c32.e2e_p50": 71949.924,
+    "R/isl1024-c32.e2e_p90": 88081.992,
+    "R/isl1024-c32.itl_p50": 61.166,
+    "R/isl1024-c32.output_tok_s": 455.27410384361406,
+    "R/isl8192-c1.ttft_p50": 6746.468,
+    "R/isl8192-c1.ttft_p90": 6777.403,
+    "R/isl8192-c1.tpot_p50": 37.622,
+    "R/isl8192-c1.tpot_p90": 37.66,
+    "R/isl8192-c1.e2e_p50": 45251.71,
+    "R/isl8192-c1.e2e_p90": 45264.686,
+    "R/isl8192-c1.itl_p50": 37.636,
+    "R/isl8192-c1.output_tok_s": 22.632481473843,
+    "R/isl8192-c32.ttft_p50": 25925.216,
+    "R/isl8192-c32.ttft_p90": 101258.16,
+    "R/isl8192-c32.tpot_p50": 73.429,
+    "R/isl8192-c32.tpot_p90": 74.128,
+    "R/isl8192-c32.e2e_p50": 100585.094,
+    "R/isl8192-c32.e2e_p90": 177006.339,
+    "R/isl8192-c32.itl_p50": 51.319,
+    "R/isl8192-c32.output_tok_s": 268.175958313872,
+    "W1/p1.ttft_p50": 965.219,
+    "W1/p1.ttft_p90": 1679.962,
+    "W1/p1.tpot_p50": 85.418,
+    "W1/p1.tpot_p90": 113.365,
+    "W1/p1.e2e_p50": 44625.839,
+    "W1/p1.e2e_p90": 59272.569,
+    "W1/p1.itl_p50": 50.039,
+    "W1/p1.output_tok_s": 280.853,
+    "W1/p1.goodput.standard": 0.8258,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl8192-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0649,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.3245,
+     "peak_running": 32.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.2921,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.8763,
+     "peak_running": 24.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.3185,
+     "peak_running": 46.0
+    }
+   },
+   "invalid_points": [
+    "R/isl32768-c1",
+    "R/isl32768-c32"
+   ],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-Dx1": {
+   "phase": "scr-Dx1",
+   "source": "screen-nvfp4-2node",
+   "key": "scr-Dx1",
+   "status": "passed",
+   "note": "",
+   "seconds": 3570,
+   "start": {
+    "phase": "scr-Dx1",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 423,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152
+   ],
+   "kv_tokens_total": 233152,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.3
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 123.8
+     },
+     "points": {
+      "ok": true,
+      "seconds": 2987.5
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 3128.7
+   },
+   "parity": null,
+   "reference": "scr-Dx1",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 349.159,
+    "R/isl1024-c1.ttft_p90": 400.78,
+    "R/isl1024-c1.tpot_p50": 20.43,
+    "R/isl1024-c1.tpot_p90": 20.432,
+    "R/isl1024-c1.e2e_p50": 21249.528,
+    "R/isl1024-c1.e2e_p90": 21302.889,
+    "R/isl1024-c1.itl_p50": 20.43,
+    "R/isl1024-c1.output_tok_s": 48.153635451673175,
+    "R/isl1024-c32.ttft_p50": 6067.846,
+    "R/isl1024-c32.ttft_p90": 8606.377,
+    "R/isl1024-c32.tpot_p50": 60.934,
+    "R/isl1024-c32.tpot_p90": 64.928,
+    "R/isl1024-c32.e2e_p50": 68549.196,
+    "R/isl1024-c32.e2e_p90": 70559.332,
+    "R/isl1024-c32.itl_p50": 58.705,
+    "R/isl1024-c32.output_tok_s": 477.77682489489524,
+    "R/isl32768-c1.ttft_p50": 13053.166,
+    "R/isl32768-c1.ttft_p90": 13077.921,
+    "R/isl32768-c1.tpot_p50": 22.418,
+    "R/isl32768-c1.tpot_p90": 22.421,
+    "R/isl32768-c1.e2e_p50": 35983.31,
+    "R/isl32768-c1.e2e_p90": 36012.413,
+    "R/isl32768-c1.itl_p50": 22.443,
+    "R/isl32768-c1.output_tok_s": 28.452991483804226,
+    "R/isl32768-c32.ttft_p50": 218784.865,
+    "R/isl32768-c32.ttft_p90": 379531.037,
+    "R/isl32768-c32.tpot_p50": 1151.844,
+    "R/isl32768-c32.tpot_p90": 1248.082,
+    "R/isl32768-c32.e2e_p50": 293360.417,
+    "R/isl32768-c32.e2e_p90": 421110.54,
+    "R/isl32768-c32.itl_p50": 35.146,
+    "R/isl32768-c32.output_tok_s": 4.857854976799725,
+    "R/isl8192-c1.ttft_p50": 2436.498,
+    "R/isl8192-c1.ttft_p90": 2473.215,
+    "R/isl8192-c1.tpot_p50": 21.204,
+    "R/isl8192-c1.tpot_p90": 21.219,
+    "R/isl8192-c1.e2e_p50": 24138.833,
+    "R/isl8192-c1.e2e_p90": 24170.477,
+    "R/isl8192-c1.itl_p50": 21.212,
+    "R/isl8192-c1.output_tok_s": 42.413245770548194,
+    "R/isl8192-c32.ttft_p50": 24310.332,
+    "R/isl8192-c32.ttft_p90": 94049.119,
+    "R/isl8192-c32.tpot_p50": 120.43,
+    "R/isl8192-c32.tpot_p90": 122.608,
+    "R/isl8192-c32.e2e_p50": 147485.179,
+    "R/isl8192-c32.e2e_p90": 208500.724,
+    "R/isl8192-c32.itl_p50": 64.856,
+    "R/isl8192-c32.output_tok_s": 193.6267698603801,
+    "W1/p0.ttft_p50": 374.964,
+    "W1/p0.ttft_p90": 397.069,
+    "W1/p0.tpot_p50": 29.41,
+    "W1/p0.tpot_p90": 31.326,
+    "W1/p0.e2e_p50": 15409.391,
+    "W1/p0.e2e_p90": 16385.881,
+    "W1/p0.itl_p50": 24.576,
+    "W1/p0.output_tok_s": 122.18,
+    "W1/p0.goodput.standard": 1.0,
+    "W1/p0.goodput.strict": 1.0,
+    "W1/p1.ttft_p50": 404.828,
+    "W1/p1.ttft_p90": 602.552,
+    "W1/p1.tpot_p50": 45.765,
+    "W1/p1.tpot_p90": 62.059,
+    "W1/p1.e2e_p50": 23795.217,
+    "W1/p1.e2e_p90": 32106.801,
+    "W1/p1.itl_p50": 37.407,
+    "W1/p1.output_tok_s": 298.593,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.8202,
+    "W1/p2.ttft_p50": 501.415,
+    "W1/p2.ttft_p90": 808.235,
+    "W1/p2.tpot_p50": 99.01,
+    "W1/p2.tpot_p90": 116.16,
+    "W1/p2.e2e_p50": 51320.989,
+    "W1/p2.e2e_p90": 60032.786,
+    "W1/p2.itl_p50": 73.016,
+    "W1/p2.output_tok_s": 524.893,
+    "W1/p2.goodput.standard": 0.5518,
+    "W1/p2.goodput.strict": 0.01,
+    "W1/p3.ttft_p50": 4720.117,
+    "W1/p3.ttft_p90": 10714.452,
+    "W1/p3.tpot_p50": 174.492,
+    "W1/p3.tpot_p90": 176.413,
+    "W1/p3.e2e_p50": 90685.776,
+    "W1/p3.e2e_p90": 97634.238,
+    "W1/p3.itl_p50": 104.603,
+    "W1/p3.output_tok_s": 712.327,
+    "W1/p3.goodput.standard": 0.0,
+    "W1/p3.goodput.strict": 0.0,
+    "lambda_star.W1.standard": 0.6892458723784025,
+    "output_tok_s_at_lambda.W1.standard": 349.08385229808124,
+    "cost_per_m_output.W1.standard.on_demand": 32.59325145771091,
+    "cost_per_m_output.W1.standard.spot": 10.25700711156967,
+    "lambda_star.W1.strict": 0.4446607341490545,
+    "output_tok_s_at_lambda.W1.strict": 220.2962402669633,
+    "cost_per_m_output.W1.strict.on_demand": 51.647625778768436,
+    "cost_per_m_output.W1.strict.spot": 16.253366608601688
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": 0.6892458723784025,
+     "bracketed": true,
+     "between": [
+      0.6,
+      1.0
+     ],
+     "output_tok_s": 349.08385229808124,
+     "total_tok_s": 1048.8063391343148,
+     "monotonic": true
+    },
+    "W1.strict": {
+     "value": 0.4446607341490545,
+     "bracketed": true,
+     "between": [
+      0.25,
+      0.6
+     ],
+     "output_tok_s": 220.2962402669633,
+     "total_tok_s": 667.2870522803114,
+     "monotonic": true
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0088,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.2812,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.145,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.986,
+     "peak_running": 7.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0395,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9997,
+     "peak_running": 28.0
+    },
+    "W1/p0": {
+     "peak_kv_cache_usage": 0.0459,
+     "peak_running": 8.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1733,
+     "peak_running": 31.0
+    },
+    "W1/p2": {
+     "peak_kv_cache_usage": 0.4174,
+     "peak_running": 74.0
+    },
+    "W1/p3": {
+     "peak_kv_cache_usage": 0.7463,
+     "peak_running": 128.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-Dx2": {
+   "phase": "scr-Dx2",
+   "source": "screen-nvfp4-2node",
+   "key": "scr-Dx2",
+   "status": "passed",
+   "note": "",
+   "seconds": 3110,
+   "start": {
+    "phase": "scr-Dx2",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 241,
+    "experimental": false,
+    "proxy": "lb"
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    244416
+   ],
+   "kv_tokens_total": 244416,
+   "kv_scope": "node0 only",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0:0": 244416,
+      "1:0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.6
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 77.8
+     },
+     "points": {
+      "ok": true,
+      "seconds": 2555.3
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 2650.8
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.041705,
+    "p99_abs_logprob_diff": 0.829195,
+    "top1_agreement": 0.98632,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.001737,
+      "top1_agreement": 0.99853
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.112187,
+      "top1_agreement": 0.95896
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008802,
+      "top1_agreement": 0.99902
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.044095,
+      "top1_agreement": 0.98876
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 3,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-Dx1",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 407.905,
+    "R/isl1024-c1.ttft_p90": 421.845,
+    "R/isl1024-c1.tpot_p50": 19.906,
+    "R/isl1024-c1.tpot_p90": 20.115,
+    "R/isl1024-c1.e2e_p50": 20771.639,
+    "R/isl1024-c1.e2e_p90": 20999.606,
+    "R/isl1024-c1.itl_p50": 19.874,
+    "R/isl1024-c1.output_tok_s": 49.29090509473592,
+    "R/isl1024-c32.ttft_p50": 3148.996,
+    "R/isl1024-c32.ttft_p90": 4489.612,
+    "R/isl1024-c32.tpot_p50": 37.089,
+    "R/isl1024-c32.tpot_p90": 39.28,
+    "R/isl1024-c32.e2e_p50": 41297.824,
+    "R/isl1024-c32.e2e_p90": 42176.662,
+    "R/isl1024-c32.itl_p50": 36.189,
+    "R/isl1024-c32.output_tok_s": 778.8018736550611,
+    "R/isl32768-c1.ttft_p50": 13136.409,
+    "R/isl32768-c1.ttft_p90": 13144.15,
+    "R/isl32768-c1.tpot_p50": 21.885,
+    "R/isl32768-c1.tpot_p90": 22.094,
+    "R/isl32768-c1.e2e_p50": 35518.199,
+    "R/isl32768-c1.e2e_p90": 35729.228,
+    "R/isl32768-c1.itl_p50": 21.923,
+    "R/isl32768-c1.output_tok_s": 28.82688105705965,
+    "R/isl32768-c32.ttft_p50": 112793.015,
+    "R/isl32768-c32.ttft_p90": 195500.422,
+    "R/isl32768-c32.tpot_p50": 1150.712,
+    "R/isl32768-c32.tpot_p90": 1247.324,
+    "R/isl32768-c32.e2e_p50": 190560.564,
+    "R/isl32768-c32.e2e_p90": 211262.403,
+    "R/isl32768-c32.itl_p50": 34.827,
+    "R/isl32768-c32.output_tok_s": 9.663286328979813,
+    "R/isl8192-c1.ttft_p50": 2506.678,
+    "R/isl8192-c1.ttft_p90": 2515.63,
+    "R/isl8192-c1.tpot_p50": 20.682,
+    "R/isl8192-c1.tpot_p90": 20.884,
+    "R/isl8192-c1.e2e_p50": 23664.723,
+    "R/isl8192-c1.e2e_p90": 23870.742,
+    "R/isl8192-c1.itl_p50": 20.665,
+    "R/isl8192-c1.output_tok_s": 43.279153132702106,
+    "R/isl8192-c32.ttft_p50": 12134.524,
+    "R/isl8192-c32.ttft_p90": 34292.014,
+    "R/isl8192-c32.tpot_p50": 64.598,
+    "R/isl8192-c32.tpot_p90": 69.438,
+    "R/isl8192-c32.e2e_p50": 79008.333,
+    "R/isl8192-c32.e2e_p90": 100977.893,
+    "R/isl8192-c32.itl_p50": 39.668,
+    "R/isl8192-c32.output_tok_s": 411.127608774013,
+    "W1/p0.ttft_p50": 372.087,
+    "W1/p0.ttft_p90": 385.057,
+    "W1/p0.tpot_p50": 26.375,
+    "W1/p0.tpot_p90": 30.979,
+    "W1/p0.e2e_p50": 13841.688,
+    "W1/p0.e2e_p90": 16198.892,
+    "W1/p0.itl_p50": 24.086,
+    "W1/p0.output_tok_s": 246.957,
+    "W1/p0.goodput.standard": 1.0,
+    "W1/p0.goodput.strict": 1.0,
+    "W1/p1.ttft_p50": 405.364,
+    "W1/p1.ttft_p90": 530.255,
+    "W1/p1.tpot_p50": 44.993,
+    "W1/p1.tpot_p90": 51.196,
+    "W1/p1.e2e_p50": 23387.118,
+    "W1/p1.e2e_p90": 26563.759,
+    "W1/p1.itl_p50": 37.376,
+    "W1/p1.output_tok_s": 613.083,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.8125,
+    "W1/p2.ttft_p50": 492.315,
+    "W1/p2.ttft_p90": 779.732,
+    "W1/p2.tpot_p50": 93.593,
+    "W1/p2.tpot_p90": 103.182,
+    "W1/p2.e2e_p50": 48307.07,
+    "W1/p2.e2e_p90": 53488.354,
+    "W1/p2.itl_p50": 71.659,
+    "W1/p2.output_tok_s": 1026.073,
+    "W1/p2.goodput.standard": 0.61,
+    "W1/p2.goodput.strict": 0.0155,
+    "W1/p3.ttft_p50": 9816.958,
+    "W1/p3.ttft_p90": 18263.256,
+    "W1/p3.tpot_p50": 174.966,
+    "W1/p3.tpot_p90": 176.253,
+    "W1/p3.e2e_p50": 90958.498,
+    "W1/p3.e2e_p90": 103603.601,
+    "W1/p3.itl_p50": 104.622,
+    "W1/p3.output_tok_s": 1382.55,
+    "W1/p3.goodput.standard": 0.0,
+    "W1/p3.goodput.strict": 0.0,
+    "lambda_star.W1.standard": 1.405128205128205,
+    "output_tok_s_at_lambda.W1.standard": 718.9778717948718,
+    "cost_per_m_output.W1.standard.on_demand": 31.649869138180982,
+    "cost_per_m_output.W1.standard.spot": 9.960127275174631,
+    "lambda_star.W1.strict": 0.8733333333333333,
+    "output_tok_s_at_lambda.W1.strict": 442.22419999999994,
+    "cost_per_m_output.W1.strict.on_demand": 51.45705629758742,
+    "cost_per_m_output.W1.strict.spot": 16.193394913962447
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": 1.405128205128205,
+     "bracketed": true,
+     "between": [
+      1.2,
+      2.0
+     ],
+     "output_tok_s": 718.9778717948718,
+     "total_tok_s": 2162.3805128205126,
+     "monotonic": true
+    },
+    "W1.strict": {
+     "value": 0.8733333333333333,
+     "bracketed": true,
+     "between": [
+      0.5,
+      1.2
+     ],
+     "output_tok_s": 442.22419999999994,
+     "total_tok_s": 1344.7098666666666,
+     "monotonic": true
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0088,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.1406,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.145,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.986,
+     "peak_running": 14.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0395,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.6326,
+     "peak_running": 32.0
+    },
+    "W1/p0": {
+     "peak_kv_cache_usage": 0.0445,
+     "peak_running": 15.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.1312,
+     "peak_running": 46.0
+    },
+    "W1/p2": {
+     "peak_kv_cache_usage": 0.3457,
+     "peak_running": 122.0
+    },
+    "W1/p3": {
+     "peak_kv_cache_usage": 0.7403,
+     "peak_running": 256.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-PD": {
+   "phase": "scr-PD",
+   "source": "screen-nvfp4-2node",
+   "key": "scr-PD",
+   "status": "failed",
+   "note": "experimental phase: the server never became healthy (no --enforce-eager retry in a comparison phase)",
+   "seconds": 327,
+   "start": {
+    "phase": "scr-PD",
+    "started": false,
+    "note": "the server never became healthy (no --enforce-eager retry in a comparison phase)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": true,
+    "proxy": "pd"
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "node0 only",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-Dx1",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-A@rerun-fp8-dp": {
+   "phase": "scr-A",
+   "source": "rerun-fp8-dp",
+   "key": "scr-A@rerun-fp8-dp",
+   "status": "passed",
+   "note": "",
+   "seconds": 2145,
+   "start": {
+    "phase": "scr-A",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 272,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    663104
+   ],
+   "kv_tokens_total": 663104,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 663104
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 18.5
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 122.7
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1709.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1850.4
+   },
+   "parity": null,
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 348.207,
+    "R/isl1024-c1.ttft_p90": 404.499,
+    "R/isl1024-c1.tpot_p50": 20.712,
+    "R/isl1024-c1.tpot_p90": 20.717,
+    "R/isl1024-c1.e2e_p50": 21537.038,
+    "R/isl1024-c1.e2e_p90": 21597.501,
+    "R/isl1024-c1.itl_p50": 20.712,
+    "R/isl1024-c1.output_tok_s": 47.501358246456256,
+    "R/isl1024-c32.ttft_p50": 6187.621,
+    "R/isl1024-c32.ttft_p90": 8689.158,
+    "R/isl1024-c32.tpot_p50": 68.208,
+    "R/isl1024-c32.tpot_p90": 72.205,
+    "R/isl1024-c32.e2e_p50": 76106.752,
+    "R/isl1024-c32.e2e_p90": 78228.727,
+    "R/isl1024-c32.itl_p50": 66.048,
+    "R/isl1024-c32.output_tok_s": 430.28907877979435,
+    "R/isl32768-c1.ttft_p50": 8836.686,
+    "R/isl32768-c1.ttft_p90": 8866.305,
+    "R/isl32768-c1.tpot_p50": 22.642,
+    "R/isl32768-c1.tpot_p90": 22.648,
+    "R/isl32768-c1.e2e_p50": 31993.424,
+    "R/isl32768-c1.e2e_p90": 32031.836,
+    "R/isl32768-c1.itl_p50": 22.682,
+    "R/isl32768-c1.output_tok_s": 31.99403069197768,
+    "R/isl32768-c32.ttft_p50": 212989.871,
+    "R/isl32768-c32.ttft_p90": 374362.579,
+    "R/isl32768-c32.tpot_p50": 3154.471,
+    "R/isl32768-c32.tpot_p90": 3264.785,
+    "R/isl32768-c32.e2e_p50": 412492.825,
+    "R/isl32768-c32.e2e_p90": 415120.308,
+    "R/isl32768-c32.itl_p50": 2887.332,
+    "R/isl32768-c32.output_tok_s": 4.929250285112902,
+    "R/isl8192-c1.ttft_p50": 2468.351,
+    "R/isl8192-c1.ttft_p90": 2503.946,
+    "R/isl8192-c1.tpot_p50": 21.48,
+    "R/isl8192-c1.tpot_p90": 21.484,
+    "R/isl8192-c1.e2e_p50": 24445.545,
+    "R/isl8192-c1.e2e_p90": 24477.685,
+    "R/isl8192-c1.itl_p50": 21.488,
+    "R/isl8192-c1.output_tok_s": 41.87594150328611,
+    "R/isl8192-c32.ttft_p50": 9813.68,
+    "R/isl8192-c32.ttft_p90": 65308.607,
+    "R/isl8192-c32.tpot_p50": 138.429,
+    "R/isl8192-c32.tpot_p90": 138.565,
+    "R/isl8192-c32.e2e_p50": 151436.001,
+    "R/isl8192-c32.e2e_p90": 207020.563,
+    "R/isl8192-c32.itl_p50": 73.251,
+    "R/isl8192-c32.output_tok_s": 215.34025465035853,
+    "W1/p1.ttft_p50": 417.33,
+    "W1/p1.ttft_p90": 653.642,
+    "W1/p1.tpot_p50": 54.568,
+    "W1/p1.tpot_p90": 72.0,
+    "W1/p1.e2e_p50": 28310.546,
+    "W1/p1.e2e_p90": 37200.54,
+    "W1/p1.itl_p50": 47.406,
+    "W1/p1.output_tok_s": 295.32,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.1966
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0031,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0988,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.051,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8408,
+     "peak_running": 17.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0139,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.4448,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0669,
+     "peak_running": 34.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C4m": {
+   "phase": "scr-C4m",
+   "source": "rerun-fp8-dp",
+   "key": "scr-C4m",
+   "status": "passed",
+   "note": "",
+   "seconds": 2039,
+   "start": {
+    "phase": "scr-C4m",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 288,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    200128,
+    200128,
+    200128,
+    200128
+   ],
+   "kv_tokens_total": 800512,
+   "kv_scope": "node0 and node1",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 800512,
+      "1": 800512,
+      "2": 800512,
+      "3": 800512
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 27.7
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 75.8
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1626.3
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1729.8
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035427,
+    "p99_abs_logprob_diff": 0.70838,
+    "top1_agreement": 0.98632,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002491,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.106699,
+      "top1_agreement": 0.9575
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.006489,
+      "top1_agreement": 0.99951
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.026028,
+      "top1_agreement": 0.98876
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 7,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 529.715,
+    "R/isl1024-c1.ttft_p90": 535.256,
+    "R/isl1024-c1.tpot_p50": 40.431,
+    "R/isl1024-c1.tpot_p90": 40.686,
+    "R/isl1024-c1.e2e_p50": 41875.418,
+    "R/isl1024-c1.e2e_p90": 42145.517,
+    "R/isl1024-c1.itl_p50": 40.446,
+    "R/isl1024-c1.output_tok_s": 24.419223272721975,
+    "R/isl1024-c32.ttft_p50": 4339.267,
+    "R/isl1024-c32.ttft_p90": 5191.186,
+    "R/isl1024-c32.tpot_p50": 59.386,
+    "R/isl1024-c32.tpot_p90": 66.17,
+    "R/isl1024-c32.e2e_p50": 63468.506,
+    "R/isl1024-c32.e2e_p90": 70784.831,
+    "R/isl1024-c32.itl_p50": 55.047,
+    "R/isl1024-c32.output_tok_s": 516.097054908769,
+    "R/isl32768-c1.ttft_p50": 15054.36,
+    "R/isl32768-c1.ttft_p90": 15108.798,
+    "R/isl32768-c1.tpot_p50": 42.033,
+    "R/isl32768-c1.tpot_p90": 42.043,
+    "R/isl32768-c1.e2e_p50": 58053.299,
+    "R/isl32768-c1.e2e_p90": 58099.053,
+    "R/isl32768-c1.itl_p50": 42.052,
+    "R/isl32768-c1.output_tok_s": 17.635386434627012,
+    "R/isl32768-c32.ttft_p50": 106692.373,
+    "R/isl32768-c32.ttft_p90": 188644.124,
+    "R/isl32768-c32.tpot_p50": 1464.887,
+    "R/isl32768-c32.tpot_p90": 1900.802,
+    "R/isl32768-c32.e2e_p50": 198986.572,
+    "R/isl32768-c32.e2e_p90": 201317.856,
+    "R/isl32768-c32.itl_p50": 57.506,
+    "R/isl32768-c32.output_tok_s": 10.161660300545359,
+    "R/isl8192-c1.ttft_p50": 3021.656,
+    "R/isl8192-c1.ttft_p90": 3031.792,
+    "R/isl8192-c1.tpot_p50": 40.911,
+    "R/isl8192-c1.tpot_p90": 41.28,
+    "R/isl8192-c1.e2e_p50": 44879.047,
+    "R/isl8192-c1.e2e_p90": 45225.746,
+    "R/isl8192-c1.itl_p50": 40.955,
+    "R/isl8192-c1.output_tok_s": 22.806915537685036,
+    "R/isl8192-c32.ttft_p50": 13561.002,
+    "R/isl8192-c32.ttft_p90": 34009.391,
+    "R/isl8192-c32.tpot_p50": 77.603,
+    "R/isl8192-c32.tpot_p90": 89.517,
+    "R/isl8192-c32.e2e_p50": 97757.727,
+    "R/isl8192-c32.e2e_p90": 113434.317,
+    "R/isl8192-c32.itl_p50": 60.575,
+    "R/isl8192-c32.output_tok_s": 334.3761977743696,
+    "W1/p1.ttft_p50": 514.988,
+    "W1/p1.ttft_p90": 750.258,
+    "W1/p1.tpot_p50": 64.759,
+    "W1/p1.tpot_p90": 70.079,
+    "W1/p1.e2e_p50": 33611.946,
+    "W1/p1.e2e_p90": 36369.366,
+    "W1/p1.itl_p50": 51.183,
+    "W1/p1.output_tok_s": 300.93,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0169
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0102,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0921,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.1689,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.9846,
+     "peak_running": 24.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0461,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.4146,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0624,
+     "peak_running": 35.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C8m": {
+   "phase": "scr-C8m",
+   "source": "rerun-fp8-dp",
+   "key": "scr-C8m",
+   "status": "passed",
+   "note": "",
+   "seconds": 2092,
+   "start": {
+    "phase": "scr-C8m",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 340,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    149824,
+    149824,
+    149824,
+    149824,
+    149824,
+    149824,
+    149824,
+    149824
+   ],
+   "kv_tokens_total": 1198592,
+   "kv_scope": "node0 and node1",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 1198592,
+      "1": 1198592,
+      "2": 1198592,
+      "3": 1198592,
+      "4": 1198592,
+      "5": 1198592,
+      "6": 1198592,
+      "7": 1198592
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.1
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 29.6
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 71.7
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1628.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1729.5
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.035145,
+    "p99_abs_logprob_diff": 0.733119,
+    "top1_agreement": 0.98766,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.002126,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.104851,
+      "top1_agreement": 0.96141
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.007264,
+      "top1_agreement": 0.99902
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.026338,
+      "top1_agreement": 0.99072
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 0,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 17,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 679.438,
+    "R/isl1024-c1.ttft_p90": 679.964,
+    "R/isl1024-c1.tpot_p50": 44.233,
+    "R/isl1024-c1.tpot_p90": 44.332,
+    "R/isl1024-c1.e2e_p50": 45929.602,
+    "R/isl1024-c1.e2e_p90": 46031.243,
+    "R/isl1024-c1.itl_p50": 44.219,
+    "R/isl1024-c1.output_tok_s": 22.30085059840597,
+    "R/isl1024-c32.ttft_p50": 3552.01,
+    "R/isl1024-c32.ttft_p90": 4845.064,
+    "R/isl1024-c32.tpot_p50": 58.657,
+    "R/isl1024-c32.tpot_p90": 65.319,
+    "R/isl1024-c32.e2e_p50": 62969.691,
+    "R/isl1024-c32.e2e_p90": 69803.735,
+    "R/isl1024-c32.itl_p50": 57.052,
+    "R/isl1024-c32.output_tok_s": 520.1436305932035,
+    "R/isl32768-c1.ttft_p50": 20556.628,
+    "R/isl32768-c1.ttft_p90": 20648.589,
+    "R/isl32768-c1.tpot_p50": 44.894,
+    "R/isl32768-c1.tpot_p90": 44.924,
+    "R/isl32768-c1.e2e_p50": 66499.785,
+    "R/isl32768-c1.e2e_p90": 66568.728,
+    "R/isl32768-c1.itl_p50": 44.907,
+    "R/isl32768-c1.output_tok_s": 15.398205801380296,
+    "R/isl32768-c32.ttft_p50": 92646.489,
+    "R/isl32768-c32.ttft_p90": 151284.838,
+    "R/isl32768-c32.tpot_p50": 958.266,
+    "R/isl32768-c32.tpot_p90": 1741.688,
+    "R/isl32768-c32.e2e_p50": 153017.224,
+    "R/isl32768-c32.e2e_p90": 154237.555,
+    "R/isl32768-c32.itl_p50": 54.905,
+    "R/isl32768-c32.output_tok_s": 13.274480357564288,
+    "R/isl8192-c1.ttft_p50": 4389.487,
+    "R/isl8192-c1.ttft_p90": 4398.83,
+    "R/isl8192-c1.tpot_p50": 44.23,
+    "R/isl8192-c1.tpot_p90": 44.234,
+    "R/isl8192-c1.e2e_p50": 49636.712,
+    "R/isl8192-c1.e2e_p90": 49650.65,
+    "R/isl8192-c1.itl_p50": 44.226,
+    "R/isl8192-c1.output_tok_s": 20.635292721807676,
+    "R/isl8192-c32.ttft_p50": 13786.219,
+    "R/isl8192-c32.ttft_p90": 33118.711,
+    "R/isl8192-c32.tpot_p50": 70.365,
+    "R/isl8192-c32.tpot_p90": 74.079,
+    "R/isl8192-c32.e2e_p50": 85960.884,
+    "R/isl8192-c32.e2e_p90": 106395.232,
+    "R/isl8192-c32.itl_p50": 51.714,
+    "R/isl8192-c32.output_tok_s": 379.90779749473285,
+    "W1/p1.ttft_p50": 655.051,
+    "W1/p1.ttft_p90": 1058.908,
+    "W1/p1.tpot_p50": 71.214,
+    "W1/p1.tpot_p90": 85.548,
+    "W1/p1.e2e_p50": 37180.905,
+    "W1/p1.e2e_p90": 44363.286,
+    "W1/p1.itl_p50": 51.574,
+    "W1/p1.output_tok_s": 293.75,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "capacity point"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0137,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.0684,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.2256,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.8769,
+     "peak_running": 32.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0615,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.2462,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0577,
+     "peak_running": 38.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-C16m": {
+   "phase": "scr-C16m",
+   "source": "rerun-fp8-dp",
+   "key": "scr-C16m",
+   "status": "passed",
+   "note": "relaunched with --max-model-len -1 (vLLM estimated 60864 tokens)",
+   "seconds": 2523,
+   "start": {
+    "phase": "scr-C16m",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 61376,
+    "length_fallback": {
+     "requested": 131072,
+     "estimated": 60864
+    },
+    "seconds_to_healthy": 390,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 61376,
+   "kv_tokens": [
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376,
+    61376
+   ],
+   "kv_tokens_total": 982016,
+   "kv_scope": "node0 and node1",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 61376,
+     "kv_tokens_per_engine": {
+      "0": 982016,
+      "1": 982016,
+      "2": 982016,
+      "3": 982016,
+      "4": 982016,
+      "5": 982016,
+      "6": 982016,
+      "7": 982016,
+      "8": 982016,
+      "9": 982016,
+      "10": 982016,
+      "11": 982016,
+      "12": 982016,
+      "13": 982016,
+      "14": 982016,
+      "15": 982016
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.1
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 33.6
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 68.8
+     },
+     "points": {
+      "ok": true,
+      "seconds": 1740.8
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 1843.3
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.034967,
+    "p99_abs_logprob_diff": 0.726263,
+    "top1_agreement": 0.98718,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.001994,
+      "top1_agreement": 0.99902
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.10415,
+      "top1_agreement": 0.96043
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.006277,
+      "top1_agreement": 0.99902
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.027446,
+      "top1_agreement": 0.99023
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 3,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": null,
+     "ko-06-unsu-joeun-nal@0": 7,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": null
+    }
+   },
+   "reference": "scr-A",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 929.828,
+    "R/isl1024-c1.ttft_p90": 963.621,
+    "R/isl1024-c1.tpot_p50": 49.013,
+    "R/isl1024-c1.tpot_p90": 49.033,
+    "R/isl1024-c1.e2e_p50": 51052.995,
+    "R/isl1024-c1.e2e_p90": 51116.383,
+    "R/isl1024-c1.itl_p50": 48.967,
+    "R/isl1024-c1.output_tok_s": 20.058431876966225,
+    "R/isl1024-c32.ttft_p50": 3174.677,
+    "R/isl1024-c32.ttft_p90": 4629.436,
+    "R/isl1024-c32.tpot_p50": 59.595,
+    "R/isl1024-c32.tpot_p90": 67.476,
+    "R/isl1024-c32.e2e_p50": 64139.351,
+    "R/isl1024-c32.e2e_p90": 71802.679,
+    "R/isl1024-c32.itl_p50": 58.053,
+    "R/isl1024-c32.output_tok_s": 510.4302580559019,
+    "R/isl32768-c1.ttft_p50": 31620.683,
+    "R/isl32768-c1.ttft_p90": 31639.672,
+    "R/isl32768-c1.tpot_p50": 50.351,
+    "R/isl32768-c1.tpot_p90": 50.361,
+    "R/isl32768-c1.e2e_p50": 83136.54,
+    "R/isl32768-c1.e2e_p90": 83153.898,
+    "R/isl32768-c1.itl_p50": 50.364,
+    "R/isl32768-c1.output_tok_s": 12.318528330713265,
+    "R/isl32768-c32.ttft_p50": 99066.809,
+    "R/isl32768-c32.ttft_p90": 141823.821,
+    "R/isl32768-c32.tpot_p50": 107.25,
+    "R/isl32768-c32.tpot_p90": 109.358,
+    "R/isl32768-c32.e2e_p50": 110234.818,
+    "R/isl32768-c32.e2e_p90": 144395.814,
+    "R/isl32768-c32.itl_p50": 49.592,
+    "R/isl32768-c32.output_tok_s": 14.180528748486791,
+    "R/isl8192-c1.ttft_p50": 7164.977,
+    "R/isl8192-c1.ttft_p90": 7176.524,
+    "R/isl8192-c1.tpot_p50": 48.427,
+    "R/isl8192-c1.tpot_p90": 48.525,
+    "R/isl8192-c1.e2e_p50": 56694.547,
+    "R/isl8192-c1.e2e_p90": 56809.414,
+    "R/isl8192-c1.itl_p50": 48.408,
+    "R/isl8192-c1.output_tok_s": 18.058608496707606,
+    "R/isl8192-c32.ttft_p50": 18638.356,
+    "R/isl8192-c32.ttft_p90": 31727.049,
+    "R/isl8192-c32.tpot_p50": 64.735,
+    "R/isl8192-c32.tpot_p90": 66.748,
+    "R/isl8192-c32.e2e_p50": 84915.028,
+    "R/isl8192-c32.e2e_p90": 97691.519,
+    "R/isl8192-c32.itl_p50": 52.536,
+    "R/isl8192-c32.output_tok_s": 384.9699845621036,
+    "W1/p1.ttft_p50": 1034.506,
+    "W1/p1.ttft_p90": 1748.606,
+    "W1/p1.tpot_p50": 103.87,
+    "W1/p1.tpot_p90": 119.828,
+    "W1/p1.e2e_p50": 54450.029,
+    "W1/p1.e2e_p90": 62278.644,
+    "W1/p1.itl_p50": 64.367,
+    "W1/p1.output_tok_s": 286.207,
+    "W1/p1.goodput.standard": 0.3427,
+    "W1/p1.goodput.strict": 0.0
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    },
+    "W1.strict": {
+     "value": null,
+     "bracketed": false,
+     "reason": "fewer than two valid rates"
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0334,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.1002,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.5511,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.5355,
+     "peak_running": 16.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.1503,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.3006,
+     "peak_running": 32.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.0981,
+     "peak_running": 49.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-Dref": {
+   "phase": "scr-Dref",
+   "source": "rerun-pd-1",
+   "key": "scr-Dref",
+   "status": "passed",
+   "note": "",
+   "seconds": 469,
+   "start": {
+    "phase": "scr-Dref",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 433,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152
+   ],
+   "kv_tokens_total": 233152,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 17.3
+   },
+   "parity": null,
+   "reference": "scr-Dref",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-PD@rerun-pd-1": {
+   "phase": "scr-PD",
+   "source": "rerun-pd-1",
+   "key": "scr-PD@rerun-pd-1",
+   "status": "failed",
+   "note": "experimental phase: PD not possible here: NIXL preflight failed (node0 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node0 UCX_MEMTYPE_CACHE=n: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node1 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registrati)",
+   "seconds": 39,
+   "start": {
+    "phase": "scr-PD",
+    "started": false,
+    "note": "PD not possible here: NIXL preflight failed (node0 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node0 UCX_MEMTYPE_CACHE=n: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node1 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registrati)",
+    "requested_max_model_len": 131072,
+    "max_model_len": null,
+    "length_fallback": null,
+    "seconds_to_healthy": null,
+    "experimental": true,
+    "proxy": "pd"
+   },
+   "max_model_len": null,
+   "kv_tokens": [],
+   "kv_tokens_total": null,
+   "kv_scope": "node0 only",
+   "problems": null,
+   "screen": null,
+   "parity": null,
+   "reference": "scr-Dref",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": {
+    "choice": null,
+    "reason": "node0 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node0 UCX_MEMTYPE_CACHE=n: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registration): nixlBackendError: NIXL_ERR_BACKEND; node1 default: VRAM registration failed (alloc-before-first-registration, alloc-after-first-registrati"
+   },
+   "missing_part": false
+  },
+  "scr-Dref@rerun-pd-2": {
+   "phase": "scr-Dref",
+   "source": "rerun-pd-2",
+   "key": "scr-Dref@rerun-pd-2",
+   "status": "passed",
+   "note": "",
+   "seconds": 469,
+   "start": {
+    "phase": "scr-Dref",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 433,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152
+   ],
+   "kv_tokens_total": 233152,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.3
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 17.3
+   },
+   "parity": null,
+   "reference": "scr-Dref",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-PD@rerun-pd-2": {
+   "phase": "scr-PD",
+   "source": "rerun-pd-2",
+   "key": "scr-PD@rerun-pd-2",
+   "status": "failed",
+   "note": "experimental phase: client failed [NIXL preflight passed with UCX_TLS=all UCX_NET_DEVICES=all]",
+   "seconds": 746,
+   "start": {
+    "phase": "scr-PD",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 523,
+    "experimental": true,
+    "proxy": "pd"
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152,
+    233152
+   ],
+   "kv_tokens_total": 466304,
+   "kv_scope": "node0 and node1",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "prefill:0": 233152,
+      "decode:0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": false,
+      "error": "HTTPError: HTTP Error 500: Internal Server Error",
+      "seconds": 2.4
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 33.6
+     }
+    },
+    "aborted": "the server stopped answering /health before the points",
+    "suite_seconds": 126.1
+   },
+   "parity": null,
+   "reference": "scr-Dref",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": {
+    "job_env": {
+     "node0": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     },
+     "node1": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     }
+    },
+    "choice": "UCX_TLS=all UCX_NET_DEVICES=all",
+    "choice_env": {
+     "UCX_TLS": "all",
+     "UCX_NET_DEVICES": "all"
+    }
+   },
+   "missing_part": false
+  },
+  "scr-Dref@rerun-pd-3": {
+   "phase": "scr-Dref",
+   "source": "rerun-pd-3",
+   "key": "scr-Dref@rerun-pd-3",
+   "status": "passed",
+   "note": "",
+   "seconds": 469,
+   "start": {
+    "phase": "scr-Dref",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 433,
+    "experimental": false,
+    "proxy": null
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    233152
+   ],
+   "kv_tokens_total": 233152,
+   "kv_scope": "all engines",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "0": 233152
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.0
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.4
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 17.4
+   },
+   "parity": null,
+   "reference": "scr-Dref",
+   "metrics": {},
+   "flags": {},
+   "lambda": {},
+   "peaks": {},
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": null,
+   "missing_part": false
+  },
+  "scr-PD@rerun-pd-3": {
+   "phase": "scr-PD",
+   "source": "rerun-pd-3",
+   "key": "scr-PD@rerun-pd-3",
+   "status": "passed",
+   "note": "NIXL preflight passed with UCX_TLS=all UCX_NET_DEVICES=all",
+   "seconds": 3652,
+   "start": {
+    "phase": "scr-PD",
+    "started": true,
+    "note": null,
+    "requested_max_model_len": 131072,
+    "max_model_len": 131072,
+    "length_fallback": null,
+    "seconds_to_healthy": 372,
+    "experimental": true,
+    "proxy": "pd"
+   },
+   "max_model_len": 131072,
+   "kv_tokens": [
+    178816,
+    178816
+   ],
+   "kv_tokens_total": 357632,
+   "kv_scope": "node0 and node1",
+   "problems": [],
+   "screen": {
+    "facts": {
+     "max_model_len": 131072,
+     "kv_tokens_per_engine": {
+      "prefill:0": 178816,
+      "decode:0": 178816
+     }
+    },
+    "steps": {
+     "facts": {
+      "ok": true,
+      "seconds": 0.1
+     },
+     "parity": {
+      "ok": true,
+      "seconds": 17.2
+     },
+     "warmup": {
+      "ok": true,
+      "seconds": 117.7
+     },
+     "points": {
+      "ok": true,
+      "seconds": 2964.2
+     }
+    },
+    "aborted": null,
+    "suite_seconds": 3099.2
+   },
+   "parity": {
+    "positions": 8188,
+    "mean_abs_logprob_diff": 0.036592,
+    "p99_abs_logprob_diff": 0.740036,
+    "top1_agreement": 0.98571,
+    "documents": {
+     "ko-01-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.001973,
+      "top1_agreement": 0.99951
+     },
+     "ko-06-unsu-joeun-nal": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.103617,
+      "top1_agreement": 0.95603
+     },
+     "en-01-us-constitution": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.008856,
+      "top1_agreement": 0.99658
+     },
+     "en-04-pride-and-prejudice": {
+      "positions": 2047,
+      "mean_abs_logprob_diff": 0.031922,
+      "top1_agreement": 0.99072
+     }
+    },
+    "greedy_prompts": 4,
+    "greedy_identical": 1,
+    "greedy_diverged_before_16": 1,
+    "greedy_first_difference": {
+     "ko-01-constitution@0": 112,
+     "ko-06-unsu-joeun-nal@0": 6,
+     "en-01-us-constitution@0": null,
+     "en-04-pride-and-prejudice@0": 62
+    }
+   },
+   "reference": "scr-Dref",
+   "metrics": {
+    "R/isl1024-c1.ttft_p50": 481.088,
+    "R/isl1024-c1.ttft_p90": 515.521,
+    "R/isl1024-c1.tpot_p50": 20.399,
+    "R/isl1024-c1.tpot_p90": 20.423,
+    "R/isl1024-c1.e2e_p50": 21348.339,
+    "R/isl1024-c1.e2e_p90": 21408.591,
+    "R/isl1024-c1.itl_p50": 20.398,
+    "R/isl1024-c1.output_tok_s": 47.9241556119138,
+    "R/isl1024-c32.ttft_p50": 2411.065,
+    "R/isl1024-c32.ttft_p90": 8505.997,
+    "R/isl1024-c32.tpot_p50": 57.67,
+    "R/isl1024-c32.tpot_p90": 58.82,
+    "R/isl1024-c32.e2e_p50": 61356.519,
+    "R/isl1024-c32.e2e_p90": 68547.141,
+    "R/isl1024-c32.itl_p50": 58.715,
+    "R/isl1024-c32.output_tok_s": 509.8074525921861,
+    "R/isl32768-c1.ttft_p50": 14824.775,
+    "R/isl32768-c1.ttft_p90": 14862.868,
+    "R/isl32768-c1.tpot_p50": 22.376,
+    "R/isl32768-c1.tpot_p90": 22.379,
+    "R/isl32768-c1.e2e_p50": 37714.449,
+    "R/isl32768-c1.e2e_p90": 37753.054,
+    "R/isl32768-c1.itl_p50": 22.373,
+    "R/isl32768-c1.output_tok_s": 27.1445296980429,
+    "R/isl32768-c32.ttft_p50": 215050.291,
+    "R/isl32768-c32.ttft_p90": 375005.932,
+    "R/isl32768-c32.tpot_p50": 22.414,
+    "R/isl32768-c32.tpot_p90": 22.521,
+    "R/isl32768-c32.e2e_p50": 216463.067,
+    "R/isl32768-c32.e2e_p90": 376420.581,
+    "R/isl32768-c32.itl_p50": 22.374,
+    "R/isl32768-c32.output_tok_s": 4.919173637514163,
+    "R/isl8192-c1.ttft_p50": 2923.154,
+    "R/isl8192-c1.ttft_p90": 2939.96,
+    "R/isl8192-c1.tpot_p50": 21.171,
+    "R/isl8192-c1.tpot_p90": 21.175,
+    "R/isl8192-c1.e2e_p50": 24581.035,
+    "R/isl8192-c1.e2e_p90": 24601.236,
+    "R/isl8192-c1.itl_p50": 21.147,
+    "R/isl8192-c1.output_tok_s": 41.65194056088136,
+    "R/isl8192-c32.ttft_p50": 32730.78,
+    "R/isl8192-c32.ttft_p90": 62025.353,
+    "R/isl8192-c32.tpot_p50": 44.557,
+    "R/isl8192-c32.tpot_p90": 45.423,
+    "R/isl8192-c32.e2e_p50": 78995.556,
+    "R/isl8192-c32.e2e_p90": 108462.842,
+    "R/isl8192-c32.itl_p50": 45.102,
+    "R/isl8192-c32.output_tok_s": 344.8112302775298,
+    "W1/p0.ttft_p50": 590.199,
+    "W1/p0.ttft_p90": 787.991,
+    "W1/p0.tpot_p50": 33.152,
+    "W1/p0.tpot_p90": 36.538,
+    "W1/p0.e2e_p50": 17645.251,
+    "W1/p0.e2e_p90": 19372.036,
+    "W1/p0.itl_p50": 29.919,
+    "W1/p0.output_tok_s": 247.603,
+    "W1/p0.goodput.standard": 1.0,
+    "W1/p0.goodput.strict": 0.9658,
+    "W1/p1.ttft_p50": 752.27,
+    "W1/p1.ttft_p90": 1171.785,
+    "W1/p1.tpot_p50": 63.979,
+    "W1/p1.tpot_p90": 71.522,
+    "W1/p1.e2e_p50": 33583.6,
+    "W1/p1.e2e_p90": 37506.752,
+    "W1/p1.itl_p50": 64.56,
+    "W1/p1.output_tok_s": 608.06,
+    "W1/p1.goodput.standard": 1.0,
+    "W1/p1.goodput.strict": 0.0,
+    "W1/p2.ttft_p50": 1102.749,
+    "W1/p2.ttft_p90": 1657.478,
+    "W1/p2.tpot_p50": 107.841,
+    "W1/p2.tpot_p90": 112.182,
+    "W1/p2.e2e_p50": 56425.991,
+    "W1/p2.e2e_p90": 58548.428,
+    "W1/p2.itl_p50": 104.977,
+    "W1/p2.output_tok_s": 1011.73,
+    "W1/p2.goodput.standard": 0.4175,
+    "W1/p2.goodput.strict": 0.0,
+    "W1/p3.ttft_p50": 52906.367,
+    "W1/p3.ttft_p90": 98705.998,
+    "W1/p3.tpot_p50": 110.007,
+    "W1/p3.tpot_p90": 113.661,
+    "W1/p3.e2e_p50": 110352.456,
+    "W1/p3.e2e_p90": 152182.564,
+    "W1/p3.itl_p50": 104.344,
+    "W1/p3.output_tok_s": 1148.63,
+    "W1/p3.goodput.standard": 0.0,
+    "W1/p3.goodput.strict": 0.0,
+    "lambda_star.W1.standard": 1.3373390557939913,
+    "output_tok_s_at_lambda.W1.standard": 677.3595708154505,
+    "cost_per_m_output.W1.standard.on_demand": 33.59449919362755,
+    "cost_per_m_output.W1.standard.spot": 10.572097036275858,
+    "lambda_star.W1.strict": 0.547691033340236,
+    "output_tok_s_at_lambda.W1.strict": 272.1609525781735,
+    "cost_per_m_output.W1.strict.on_demand": 83.61065516560248,
+    "cost_per_m_output.W1.strict.spot": 26.312044557729884
+   },
+   "flags": {
+    "R/isl32768-c32": [
+     "kv-bound"
+    ],
+    "R/isl8192-c32": [
+     "kv-bound"
+    ],
+    "W1/p3": [
+     "capacity-bound",
+     "kv-bound"
+    ]
+   },
+   "lambda": {
+    "W1.standard": {
+     "value": 1.3373390557939913,
+     "bracketed": true,
+     "between": [
+      1.2,
+      2.0
+     ],
+     "output_tok_s": 677.3595708154505,
+     "total_tok_s": 2058.866227467811,
+     "monotonic": true
+    },
+    "W1.strict": {
+     "value": 0.547691033340236,
+     "bracketed": true,
+     "between": [
+      0.5,
+      1.2
+     ],
+     "output_tok_s": 272.1609525781735,
+     "total_tok_s": 822.1341774694554,
+     "monotonic": true
+    }
+   },
+   "peaks": {
+    "R/isl1024-c1": {
+     "peak_kv_cache_usage": 0.0115,
+     "peak_running": 1.0
+    },
+    "R/isl1024-c32": {
+     "peak_kv_cache_usage": 0.348,
+     "peak_running": 32.0
+    },
+    "R/isl32768-c1": {
+     "peak_kv_cache_usage": 0.189,
+     "peak_running": 1.0
+    },
+    "R/isl32768-c32": {
+     "peak_kv_cache_usage": 0.2291,
+     "peak_running": 2.0
+    },
+    "R/isl8192-c1": {
+     "peak_kv_cache_usage": 0.0516,
+     "peak_running": 1.0
+    },
+    "R/isl8192-c32": {
+     "peak_kv_cache_usage": 0.9789,
+     "peak_running": 21.0
+    },
+    "W1/p0": {
+     "peak_kv_cache_usage": 0.1178,
+     "peak_running": 16.0
+    },
+    "W1/p1": {
+     "peak_kv_cache_usage": 0.4354,
+     "peak_running": 60.0
+    },
+    "W1/p2": {
+     "peak_kv_cache_usage": 0.9345,
+     "peak_running": 128.0
+    },
+    "W1/p3": {
+     "peak_kv_cache_usage": 1.0,
+     "peak_running": 136.0
+    }
+   },
+   "invalid_points": [],
+   "reclaim": null,
+   "preflight": {
+    "job_env": {
+     "node0": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     },
+     "node1": {
+      "UCX_NET_DEVICES": "eth0",
+      "UCX_TLS": "tcp"
+     }
+    },
+    "choice": "UCX_TLS=all UCX_NET_DEVICES=all",
+    "choice_env": {
+     "UCX_TLS": "all",
+     "UCX_NET_DEVICES": "all"
+    }
+   },
+   "missing_part": false
+  }
+ }
+}

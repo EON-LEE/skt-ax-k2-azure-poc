@@ -1,7 +1,7 @@
 {
  "schema": "axk2-slo-protocol/1",
  "title": "A.X K2 serving re-measurement protocol on 2 x ND96amsr A100 v4 (vLLM v0.23.0)",
- "status": "Pre-registration draft. The screening ran once at main 5dc653b; its follow-ups (the mp-multinode C4m, C8m, C16m and the PD rerun) and the rounds have not run. The screening (section screen) picks the round candidates first; then freeze aml/src/bench/ (this file, slo_suites.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit with the chosen ROUND_LAYOUTS before round 1; publish every run, including invalid and aborted runs.",
+ "status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit with the chosen ROUND_LAYOUTS; publish every run, including invalid and aborted runs.",
  "doc": "docs/BENCHMARK_PROTOCOL.md",
  "assumptions": [
   "The SLO tiers are assumptions until the customer agrees them (or supplies its own) before round 1.",
