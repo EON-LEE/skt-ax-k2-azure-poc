@@ -1,10 +1,17 @@
 import csv
+import importlib.util
+import io
 import json
 import math
+import os
+import random
 import sys
 import tempfile
+import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "aml" / "src" / "bench"), str(ROOT / "aml" / "src")]
@@ -13,6 +20,90 @@ del sys.path[:2]
 
 PROTOCOL = bs.load_protocol()
 W1 = PROTOCOL["slo"]["tiers"]["standard"]["W1"]
+ENGINES = {"A4": 1, "C2": 2, "C4": 4, "C8": 8, "C16": 16, "D8": 8, "D24": 2, "Dx2": 2, "PD": 2}
+
+
+def synthetic_point(rng, phase, workload, key, index, kind, requests, engines, rate=None, attempt=1):
+    """A package point with the fields and the per-request rows compact_point() writes, sized like a real one."""
+    rows, now = [], 0.0
+    output = 512 if workload == "W1" else 1024
+    for _ in range(requests):
+        now += rng.expovariate(rate) if rate else rng.random() * 0.2
+        ttft, tpot = rng.lognormvariate(-0.7, 0.6), rng.uniform(0.018, 0.09)
+        rows.append([round(now, 4), round(ttft, 5), round(tpot, 6), round(ttft + tpot * (output - 1), 4), 1, output,
+                     rng.randint(0, output)])
+    stats = {name: round(rng.uniform(10, 900), 3) for name in bs.POINT_STATS}
+    return {"id": f"{workload}/{key}", "name": f"{workload}-{key}" + (f"-r{rate:g}" if rate else ""), "phase": phase,
+            "layout": phase.split("-", 1)[1], "round": 0, "workload": workload, "slo_workload": "W1", "point": key,
+            "index": index, "kind": kind, "rate": rate, "concurrency": None if rate else 32, "seed": 10000 + index,
+            "attempt": attempt, "capacity_point": False, "valid": True, "invalid_reasons": [], "flags": [],
+            "window": [60, 360] if rate else None, "t_start_unix": 1.79e9 + rng.random() * 1e4, "t_end_unix": 1.79e9,
+            "steady": {**stats, "requests": requests, "failed": 0, "window": [60, 360] if rate else None,
+                       "input_tok_s": round(rng.uniform(100, 9000), 3), "p99_reportable": False,
+                       "goodput": {"standard": round(rng.random(), 4), "strict": round(rng.random(), 4)}},
+            "summary": {k: round(rng.uniform(0, 5000), 3) for k in ("completed", "failed", "duration", "output_throughput",
+                                                                    "request_goodput", "median_ttft_ms", "median_tpot_ms",
+                                                                    "median_itl_ms", "max_concurrent_requests")},
+            "engine_peaks": {str(e): {"num_requests_running": rng.randint(0, 128), "num_requests_waiting": rng.randint(0, 9),
+                                      "kv_cache_usage_perc": round(rng.random(), 4)} for e in range(engines)},
+            "counters": {f"vllm:counter_{i}_total": round(rng.uniform(0, 1e6), 1) for i in range(18)},
+            "gpu": {node: {"samples": rng.randint(100, 900), "invalid_fraction": 0.0, "power_cap_fraction": round(rng.random(), 4),
+                           "sm_clock_mhz_mean": round(rng.uniform(1200, 1410), 1), "power_w_mean": round(rng.uniform(150, 400), 1),
+                           "temperature_c_max": rng.randint(40, 80)} for node in ("node0", "node1")},
+            "ib": {node: {"ports": 8, "sent_gb": round(rng.uniform(0, 90), 3), "received_gb": round(rng.uniform(0, 90), 3)}
+                   for node in ("node0", "node1")},
+            "requests": rows}
+
+
+def synthetic_screening_package(job, seed=7, retries=0.15):
+    """A results package shaped like one screening job's (slo_protocol.json screen.jobs[job]) after every launch."""
+    rng = random.Random(seed)
+    plan = PROTOCOL["screen"]["jobs"][job]["plan"]
+    part_r = [(item["name"], index, 32 if item["name"] == "isl32768-c32" else item["prompts"])
+              for index, item in enumerate(PROTOCOL["workloads"]["R"]["points"])]
+    points, effective, nccl, clean, start, screens, parity, plans = [], {}, {}, {}, {}, {}, {}, {}
+    for phase in plan:
+        layout = phase.split("-", 1)[1]
+        engines = ENGINES.get(layout, 1)
+        options = PROTOCOL["phases"][phase].get("options", {}).get("screen", {})
+        ladder = options.get("ladder")
+        rates = ([PROTOCOL["screen"]["w1"]["rate"]] if not ladder else
+                 PROTOCOL["workloads"]["W1"]["rates"] if ladder == "W1" else PROTOCOL["rate_sets"][ladder]["W1"])
+        launch = [synthetic_point(rng, phase, "R", key, index, "closed", count, engines) for key, index, count in part_r]
+        launch += [synthetic_point(rng, phase, "W1", f"p{i}", i, "open", max(60, math.ceil(r * 360)), engines, rate=r)
+                   for i, r in enumerate(rates)]
+        retried = [dict(p, attempt=2, name=p["name"] + "-retry") for p in launch if rng.random() < retries]
+        points += launch + retried
+        effective[phase] = {"max_model_len": 131072, "enforce_eager": False, "kv_tokens": [rng.randint(60000, 700000)] * engines,
+                            "graph_capture_by_node": {"node0": 8}, "problems": [],
+                            "engine_config": "model='/models/x', " + ", ".join(f"option_{i}={rng.random():.6f}" for i in range(120)),
+                            "lines": {k: [f"line {k} {i} " + "x" * rng.randint(60, 380) for i in range(8)]
+                                      for k in ("async_scheduling", "executor", "cudagraph", "kv_cache", "loading", "dp_placement",
+                                                "expert_placement", "kv_transfer", "errors", "auto_fit")}}
+        nccl[phase] = {node: {"files": 40, "channels": {"NET/IB": rng.randint(100, 4000), "P2P": rng.randint(100, 4000)},
+                              "communicators": {f"0x{rng.getrandbits(64):016x}": {"nranks": 16, "ranks_here": 8}
+                                                for _ in range(8 * engines)}} for node in ("node0", "node1")}
+        clean[f"{phase}-before"] = clean[f"{phase}-after"] = {"clean": True, "port_8000_free": True, "placement_groups": 0}
+        start[phase] = {"phase": phase, "started": True, "requested_max_model_len": 131072, "length_fallback": None,
+                        "seconds_to_healthy": rng.randint(150, 450)}
+        screens[phase] = {"facts": {"max_model_len": 131072, "kv_tokens_per_engine": {str(e): 238656 for e in range(engines)}},
+                          "steps": {s: {"ok": True, "seconds": 9.5} for s in ("facts", "parity", "warmup", "points")}}
+        parity[phase] = {"positions": 8188, "mean_abs_logprob_diff": 0.012, "top1_agreement": 0.986,
+                         "documents": {d: {"positions": 2047, "mean_abs_logprob_diff": 0.01, "top1_agreement": 0.99}
+                                       for d in PROTOCOL["screen"]["parity"]["documents"]},
+                         "greedy_first_difference": {f"{d}@0": rng.choice([None, 40]) for d in PROTOCOL["screen"]["parity"]["documents"]}}
+        plans[phase] = {"screen": {"plan": [p["name"] for p in launch]}}
+    return {"schema": "axk2-slo-package/1", "rounds": [0], "phases": [{"phase": p, "status": "passed", "seconds": 2200} for p in plan],
+            "plans": plans, "points": points, "parity": parity, "screen_reference": plan[0], "screens": screens,
+            "protocol_plan": {"round": 0, "plan": plan, "layouts": []}, "hosts_sha256": {"node0": "a" * 12, "node1": "b" * 12},
+            "effective": effective, "nccl": nccl, "lb_stats": {}, "clean": clean, "start": start}
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def detailed(starts, ttfts, itls, outputs, errors=None, inputs=None):
@@ -340,6 +431,299 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(len(only["requests"]), 3)
         self.assertEqual(data["parity"]["slo-C2"]["mean_abs_logprob_diff"], 0.0)
         self.assertEqual(sorted(data["hosts_sha256"]), ["node0", "node1"])
+
+    def test_screening_package_uses_the_jobs_first_launch_and_keeps_the_records(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            verify = root / "node0" / "verify"
+            verify.mkdir(parents=True)
+            raw = lambda phase, chosen: {"record_type": "parity", "phase": phase, "long": False, "screen": True,
+                                         "p1": {"d": {"chosen": chosen, "top1": [1, 2]}}, "p2": {"d@0": {"generated": [1, 2, 3]}}}
+            for phase, chosen in (("scr-A", [-1.0, -2.0]), ("scr-C4", [-1.1, -2.0]), ("scr-D", [-1.0, -2.0])):
+                (verify / f"parity-{phase}.json").write_text(json.dumps(raw(phase, chosen)))
+            (verify / "scr-C4.screen.json").write_text(json.dumps({
+                "plan": ["R-isl1024-c1"], "facts": {"max_model_len": 131072}, "steps": {"parity": {"ok": True}}, "summary": []}))
+            (root / "node0" / "start-scr-C4.json").write_text(json.dumps({"length_fallback": None, "seconds_to_healthy": 200}))
+            (root / "node0" / "protocol-plan.json").write_text(json.dumps({"round": 0, "plan": ["scr-A", "scr-C4"], "layouts": []}))
+            (root / "node0" / "reclaim-scr-C4.json").write_text(json.dumps({"summary": "killed 3 processes, removed 1 Ray objects"}))
+            (root / "node1").mkdir()
+            (root / "node1" / "tail-vllm-scr-PD-replica1.log").write_text("x" * 20000 + "\nNIXL handshake with 10.1.2.3 failed\n")
+            data = bs.package(root, PROTOCOL)
+        self.assertEqual(data["screen_reference"], "scr-A", "scr-A comes first in the reference list")
+        self.assertEqual(sorted(data["parity"]), ["scr-C4", "scr-D"])
+        self.assertAlmostEqual(data["parity"]["scr-C4"]["mean_abs_logprob_diff"], 0.05)
+        self.assertEqual(data["plans"]["scr-C4"]["screen"]["plan"], ["R-isl1024-c1"])
+        self.assertEqual(data["screens"]["scr-C4"]["facts"], {"max_model_len": 131072})
+        self.assertEqual(data["start"]["scr-C4"]["seconds_to_healthy"], 200)
+        self.assertEqual(data["protocol_plan"]["plan"], ["scr-A", "scr-C4"])
+        self.assertEqual(data["reclaim"]["scr-C4"]["summary"], "killed 3 processes, removed 1 Ray objects")
+        tail = data["replica_tails"]["scr-PD"]
+        self.assertLessEqual(len(tail), bs.TAIL_CHARS)
+        self.assertIn("NIXL handshake with <ip> failed", tail)
+
+
+class ReportingTests(unittest.TestCase):
+    def test_screening_packages_round_trip_through_report_chunks_and_fetch_results(self):
+        tags = {}
+        mlflow = types.ModuleType("mlflow")
+        mlflow.set_tags = tags.update
+        tracking = types.ModuleType("mlflow.tracking")
+        tracking.MlflowClient = object
+        with mock.patch.dict(sys.modules, {"mlflow": mlflow, "mlflow.tracking": tracking}):
+            report = load_module("axk2_report_under_test", ROOT / "aml" / "src" / "report.py")
+            fetch = load_module("axk2_fetch_under_test", ROOT / "aml" / "fetch_results.py")
+            for job in PROTOCOL["screen"]["jobs"]:
+                with self.subTest(job=job):
+                    tags.clear()
+                    data = bs.sanitize(synthetic_screening_package(job))
+                    for key, payload in bs.split_package(data).items():
+                        with redirect_stdout(io.StringIO()):
+                            report.send_json(key, bs.encode_report(payload))
+                    counts = {k[:-len(".chunks")]: int(v) for k, v in tags.items() if k.endswith(".chunks")}
+                    self.assertLessEqual(max(counts.values()), bs.MAX_CHUNKS)
+                    self.assertTrue(all(len(v) <= report.CHUNK for v in tags.values()))
+                    run = types.SimpleNamespace(data=types.SimpleNamespace(tags=dict(tags)), info=types.SimpleNamespace(status="FINISHED"))
+                    status, reports = fetch.tags_json(mock.Mock(get_run=mock.Mock(return_value=run)), "job")
+                    merged = bs.merge_package(reports)
+                    order = lambda points: sorted(points, key=lambda p: (p["phase"], p["name"], p["attempt"]))
+                    self.assertEqual(order(merged["points"]), order(data["points"]))
+                    self.assertEqual(merged["missing_parts"], [])
+                    self.assertEqual(merged["missing_launches"], [])
+                    self.assertEqual({k: v for k, v in merged.items() if k not in ("points", "missing_parts", "missing_launches")},
+                                     {k: v for k, v in data.items() if k != "points"})
+                    self.assertEqual(status, "FINISHED")
+
+    def test_parts_are_halved_under_the_bound_and_missing_parts_are_reported(self):
+        data = synthetic_screening_package("nvfp4_2node")
+        parts = bs.split_package(data, max_chars=40_000)
+        self.assertTrue(any(name.endswith("-p2") for name in parts), sorted(parts))
+        self.assertTrue(all(len(bs.encode_report(v)) <= 40_000 or len(v.get("points", [])) == 1
+                            for k, v in parts.items() if k != bs.REPORT_KEY))
+        merged = bs.merge_package(parts)
+        self.assertEqual(len(merged["points"]), len(data["points"]))
+        gone = dict(parts)
+        lost = sorted(k for k in gone if k != bs.REPORT_KEY)[0]
+        del gone[lost]
+        merged = bs.merge_package(gone)
+        self.assertEqual(merged["missing_parts"], [lost[len(bs.REPORT_KEY) + 1:]])
+        self.assertEqual(merged["missing_launches"], [parts[lost]["launch"]])
+        self.assertEqual(len(merged["points"]), len(data["points"]) - len(parts[lost]["points"]))
+        whole = {"schema": "axk2-slo-package/1", "points": [], "rounds": [1]}
+        self.assertEqual(bs.merge_package({bs.REPORT_KEY: whole}), whole, "an unsplit package still reads")
+        self.assertIsNone(bs.merge_package({"node0.env": {}}))
+        rng = random.Random(3)
+        heavy = dict(data, effective={p: dict(v, lines={"x": [f"{rng.getrandbits(1200):0300x}" for _ in range(200)]})
+                                      for p, v in data["effective"].items()})
+        index = bs.split_package(heavy, max_chars=60_000)[bs.REPORT_KEY]
+        self.assertEqual(index["trimmed"], ["effective.*.lines"])
+        self.assertNotIn("lines", next(iter(index["effective"].values())))
+        self.assertLess(len(bs.encode_report(index)), 60_000)
+
+    def test_report_package_sends_changed_keys_with_the_mlflow_packages(self):
+        sent = []
+
+        def fake_run(command, env=None, check=False, timeout=None, capture_output=False, text=False):
+            sent.append((command[2], env.get("PYTHONPATH"), Path(command[4]).read_text()[:2], command[1]))
+            return mock.Mock(returncode=0, stdout=f"AXK2_REPORT {command[2]} z:...", stderr="")
+
+        data = synthetic_screening_package("nvfp4")
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(bs.subprocess, "run", fake_run), \
+                mock.patch.dict(os.environ, {"AXK2_REPORT_PKGS": "/pkgs", "PYTHONPATH": "/elsewhere"}):
+            state = str(Path(folder, "view", "reported.json"))
+            first = bs.report_package(data, state)
+            count = len(sent)
+            order = [key for key, *_ in sent]
+            second = bs.report_package(data, state)
+            data["points"].append(dict(data["points"][0], phase="scr-D42x", name="extra"))
+            bs.report_package(data, state)
+            later = [k for k, *_ in sent[count:]]
+            everything = bs.report_package(data)
+        self.assertEqual(sorted(first), sorted(bs.split_package(synthetic_screening_package("nvfp4"))))
+        self.assertTrue(all(v["sent"] for v in first.values()))
+        self.assertFalse(any(v["sent"] for v in second.values()), "nothing changed, nothing sent")
+        self.assertEqual(sorted(later), ["slo.package", "slo.package.scr-D42x"])
+        self.assertTrue(all(v["sent"] for v in everything.values()), "without a state file every key goes out (exit)")
+        self.assertEqual({(env, head) for _, env, head, _ in sent}, {("/pkgs", "z:")})
+        self.assertTrue(all(script.endswith("report.py") for *_, script in sent))
+        self.assertEqual(order[-1], "slo.package", "the index goes out after every part it names")
+
+    def test_report_output_decides_what_was_sent(self):
+        data = synthetic_screening_package("nvfp4")
+        outputs = {"AXK2_REPORT_WARN mlflow unavailable: No module named 'mlflow'": False,
+                   "AXK2_REPORT_WARN set_tags attempt 1 failed for k: busy\nAXK2_REPORT_WARN set_tags attempt 4 failed for k: busy": False,
+                   "AXK2_REPORT_WARN set_tags attempt 1 failed for k: busy\nAXK2_REPORT k z:": True,
+                   "AXK2_REPORT k z:": True}
+        for output, expected in outputs.items():
+            with self.subTest(output=output[:50]), tempfile.TemporaryDirectory() as folder, \
+                    mock.patch.object(bs.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=output, stderr="")), \
+                    redirect_stdout(io.StringIO()):
+                state = Path(folder, "reported.json")
+                summary = bs.report_package(data, str(state))
+                self.assertTrue(all(v["sent"] == expected for v in summary.values()))
+                recorded = json.loads(state.read_text()) if state.exists() else {}
+                self.assertEqual(bool(recorded), expected, "a key that did not go out is sent again next time")
+        with tempfile.TemporaryDirectory() as folder, redirect_stdout(io.StringIO()), mock.patch.object(
+                bs.subprocess, "run", side_effect=bs.subprocess.TimeoutExpired("report.py", 300)):
+            self.assertFalse(any(v["sent"] for v in bs.report_package(data, str(Path(folder, "s.json"))).values()))
+
+    def test_package_command_prints_the_key_sizes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "node0" / "verify").mkdir(parents=True)
+            with redirect_stdout(io.StringIO()) as shown:
+                self.assertEqual(bs.main(["package", folder]), 0)
+        self.assertEqual(json.loads(shown.getvalue())["keys"], {"slo.package": {"chunks": 1}})
+
+
+def screen_points(phase, tpot_1k, tpot_8k, c32_8k, flags=(), valid=True):
+    return [point(0, phase, "R/isl1024-c1", steady={"tpot_p50": tpot_1k, "ttft_p50": 300.0}),
+            point(0, phase, "R/isl8192-c1", steady={"tpot_p50": tpot_8k, "ttft_p50": 900.0}),
+            point(0, phase, "R/isl8192-c32", steady={"output_tok_s": c32_8k}, flags=flags, valid=valid)]
+
+
+def screening_job(launches, parity=None, start=None, failed=()):
+    points = [p for phase, values in launches.items() for p in screen_points(phase, *values)]
+    return {"rounds": [0], "points": points, "plans": {}, "parity": parity or {}, "start": start or {},
+            "phases": [{"phase": p, "status": "failed" if p in failed else "passed", "note": "x" if p in failed else ""}
+                       for p in launches]}
+
+
+class SelectionTests(unittest.TestCase):
+    GOOD = {"mean_abs_logprob_diff": 0.01, "top1_agreement": 0.99, "greedy_diverged_before_16": 0}
+
+    KV_BOUND = {"flags": ["kv-bound"], "peaks": {"kv_cache_usage": 0.99, "running": 26}}
+
+    def kv_bound(self, package, phases):
+        """Marks R/isl8192-c32 of these launches KV-bound (32 x 9,216 tokens exceed their KV cache)."""
+        package["points"] = [dict(p, **self.KV_BOUND) if p["phase"] in phases and p["id"] == "R/isl8192-c32" else p
+                             for p in package["points"]]
+
+    def packages(self):
+        fp8 = screening_job({"scr-A": (30, 32, 400), "scr-C2": (40, 42, 450), "scr-C4": (44, 46, 520),
+                             "scr-C8": (50, 47, 600), "scr-C16": (35, 35, 700), "scr-B0": (31, 33, 900),
+                             "scr-A4": (31, 33, 500)},
+                            parity={p: self.GOOD for p in ("scr-C2", "scr-C4", "scr-C8", "scr-C16", "scr-A4")}
+                            | {"scr-B0": dict(self.GOOD, mean_abs_logprob_diff=0.2)},
+                            start={"scr-C16": {"length_fallback": {"requested": 131072, "estimated": 70000}}})
+        self.kv_bound(fp8, {"scr-A4"})
+        nvfp4 = screening_job({"scr-D": (25, 27, 340), "scr-E": (28, 29, 330), "scr-Err": (27, 28, 320),
+                               "scr-D24": (31, 33, 400), "scr-D8": (20, 20, 500), "scr-D42": (25, 27, 900)},
+                              parity={p: self.GOOD for p in ("scr-E", "scr-Err", "scr-D24", "scr-D8", "scr-D42")},
+                              failed=("scr-D8",))
+        nvfp4["points"] = [dict(p, valid=False) if p["phase"] == "scr-D42" and p["id"] == "R/isl8192-c32" else p
+                           for p in nvfp4["points"]]
+        self.kv_bound(nvfp4, {"scr-D", "scr-E", "scr-Err"})
+        two = {"rounds": [0], "plans": {}, "parity": {"scr-Dx2": self.GOOD}, "start": {},
+               "phases": [{"phase": "scr-Dx1", "status": "passed"}, {"phase": "scr-Dx2", "status": "passed"},
+                          {"phase": "scr-PD", "status": "failed", "note": "experimental phase: the second server never became healthy"}],
+               "points": open_points(0, "scr-Dx1", [0.25, 0.6, 1.0, 1.5], [1.0, 0.95, 0.5, 0.2], [1, 2, 3, 4])
+               + open_points(0, "scr-Dx2", [0.5, 1.2, 2.0, 3.0], [1.0, 0.95, 0.5, 0.2], [1, 2, 3, 4])}
+        return [fp8, nvfp4, two]
+
+    def test_selection_rule(self):
+        selection = bs.select(self.packages(), PROTOCOL)
+        fp8, nvfp4 = selection["families"]["fp8"], selection["families"]["nvfp4"]
+        self.assertEqual(fp8["ranking"], ["scr-C4", "scr-A4", "scr-C2"], "a KV-bound ranking point does not exclude A4")
+        self.assertEqual(fp8["choice"], "C4")
+        problems = {p: " ".join(c["problems"]) for p, c in fp8["candidates"].items()}
+        self.assertIn("R/isl1024-c1.tpot_p50 is 1.67 x", problems["scr-C8"])
+        self.assertIn("could not hold --max-model-len 131072", problems["scr-C16"])
+        self.assertIn("parity: mean |d logprob| 0.2000 > 0.05", problems["scr-B0"])
+        self.assertEqual(problems["scr-A4"], "")
+        self.assertEqual(fp8["candidates"]["scr-A4"]["ranking_point"],
+                         {"flags": ["kv-bound"], "peak_kv_cache_usage": 0.99, "peak_running": 26})
+        self.assertEqual(problems["scr-C1"], "not screened")
+        self.assertEqual(nvfp4["ranking"], ["scr-D", "scr-E", "scr-Err"])
+        self.assertEqual(nvfp4["choice"], "D", "D is KV-bound at the ranking point and still selected")
+        self.assertEqual(nvfp4["candidates"]["scr-D"]["ranking_point"]["flags"], ["kv-bound"])
+        nproblems = {p: " ".join(c["problems"]) for p, c in nvfp4["candidates"].items()}
+        self.assertIn("R/isl1024-c1.tpot_p50 is 1.24 x the reference's (limit 1.2)", nproblems["scr-D24"])
+        self.assertIn("phase failed", nproblems["scr-D8"])
+        self.assertIn("R/isl8192-c32.output_tok_s missing", nproblems["scr-D42"])
+        self.assertEqual((selection["round_layouts"], selection["sensitivity"]), ("C4,D", "C4s"))
+        self.assertEqual(selection["submit"], "--set environment_variables.ROUND_LAYOUTS=C4,D")
+        self.assertEqual(selection["rates"]["slo_rates_env"], ["SLO_RATES_A", "SLO_RATES_C4", "SLO_RATES_D"])
+        self.assertEqual(selection["rates"]["soak_rates"], "SOAK_RATES=A=<req/s>,C4=<req/s>,D=<req/s>")
+        self.assertEqual(selection["dx2"]["decision"], "pass")
+        self.assertAlmostEqual(selection["dx2"]["ratio"], 2.0)
+        self.assertEqual((selection["pd"]["status"], selection["pd"]["selected"]), ("failed", False))
+        pairs = {p["name"]: p["ratios"] for p in selection["pairs"]}
+        self.assertAlmostEqual(pairs["D x 2 against D"]["lambda_star.W1.standard"], 2.0)
+        markdown = bs.selection_markdown(selection)
+        self.assertIn("C4,D", markdown)
+        self.assertIn("scr-D: eligible, 340 [kv-bound; peak KV 0.990, peak running 26]", markdown)
+
+    def test_a_failed_reference_selects_nothing_in_its_family(self):
+        packages = self.packages()
+        packages[1]["phases"][0]["status"] = "failed"
+        selection = bs.select(packages, PROTOCOL)
+        self.assertIsNone(selection["families"]["nvfp4"]["choice"])
+        self.assertEqual(selection["round_layouts"], "C4")
+        self.assertEqual(selection["rates"]["soak_rates_keys"], ["A", "C4"])
+        self.assertTrue(all("the reference scr-D did not pass" in c["problems"][0]
+                            for c in selection["families"]["nvfp4"]["candidates"].values()))
+
+    def test_dx2_decision_with_bounds(self):
+        bracketed = lambda v: {"value": v}
+        self.assertEqual(bs.dx2_decision({"value": None, "low": 3.0}, bracketed(1.2), 1.9), "pass")
+        self.assertEqual(bs.dx2_decision(bracketed(2.0), {"value": None, "low": 1.5}, 1.9), "fail")
+        self.assertEqual(bs.dx2_decision({"value": None, "low": 1.5}, {"value": None, "low": 0.6}, 1.9), "undecided")
+        self.assertEqual(bs.dx2_decision({"value": None, "high": 0.5}, bracketed(0.6), 1.9), "fail")
+        self.assertEqual(bs.dx2_decision(bracketed(1.1), bracketed(0.6), 1.9), "fail")
+        self.assertEqual(bs.dx2_decision(None, bracketed(0.6), 1.9), "undecided")
+        self.assertEqual(bs.lambda_star([(1, 0.95, 1, 1), (2, 0.93, 2, 2)])["low"], 2)
+        self.assertEqual(bs.lambda_star([(1, 0.5, 1, 1), (2, 0.3, 2, 2)])["high"], 1)
+
+    def test_select_command_reads_split_fetch_results_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = []
+            for index, pkg in enumerate(self.packages()):
+                path = Path(folder, f"screen{index}.json")
+                path.write_text(json.dumps({"job": f"j{index}", "status": "FINISHED", "reports": bs.split_package(pkg)}))
+                paths.append(str(path))
+            out, md = Path(folder, "selection.json"), Path(folder, "selection.md")
+            with redirect_stdout(io.StringIO()) as shown:
+                self.assertEqual(bs.main(["select", *paths, "--out", str(out), "--md", str(md)]), 0)
+            printed = json.loads(shown.getvalue())
+            self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["round_layouts"], "C4,D")
+            self.assertIn("| scr-C4 | passed |", md.read_text(encoding="utf-8"))
+        self.assertEqual(printed, {"round_layouts": "C4,D", "sensitivity": "C4s", "dx2": "pass",
+                                   "submit": "--set environment_variables.ROUND_LAYOUTS=C4,D",
+                                   "slo_rates_env": ["SLO_RATES_A", "SLO_RATES_C4", "SLO_RATES_D"],
+                                   "soak_rates": "SOAK_RATES=A=<req/s>,C4=<req/s>,D=<req/s>"})
+
+
+class SelectedRoundAnalysisTests(unittest.TestCase):
+    def test_analyze_follows_the_recorded_round_layouts(self):
+        maker = AnalyzeTests()
+        packages = []
+        for round_ in (1, 2, 3):
+            points = [dict(p, phase=p["phase"].replace("slo-C2", "slo-C4"), layout=p["layout"].replace("C2", "C4"))
+                      for p in maker.round_points(round_, c2_tpot=41.0)]
+            plans = {}
+            for p in points:
+                plans.setdefault(p["phase"], {}).setdefault("partr" if p["workload"] == "R" else "slo", {"plan": []})["plan"].append(p["name"])
+            for phase in ("slo-A", "slo-C4", "slo-D"):
+                if phase != "slo-D":
+                    plans[phase]["realtext"] = {"plan": []}
+                if round_ == 3:
+                    plans[phase]["soak"] = {"plan": []}
+            packages.append({"rounds": [round_], "points": points, "plans": plans, "parity": {},
+                             "protocol_plan": {"round": round_, "layouts": ["C4", "D"], "plan": []}})
+        evidence = bs.analyze(packages, PROTOCOL, resamples=0)
+        self.assertEqual(evidence["valid_rounds"], [1, 2, 3])
+        self.assertEqual(evidence["round_layouts"], {"1": ["C4", "D"], "2": ["C4", "D"], "3": ["C4", "D"]})
+        self.assertIn("slo-C4 vs slo-A", evidence["comparisons"])
+        self.assertIn("slo-C4s vs slo-C4", evidence["comparisons"])
+        self.assertNotIn("slo-C2 vs slo-A", evidence["comparisons"])
+        self.assertEqual(evidence["comparisons"]["slo-C4 vs slo-A"]["lambda_star.W1.standard"]["decision"], "better")
+        packages[0]["missing_launches"] = ["cap-C4"]
+        self.assertTrue(bs.analyze(packages, PROTOCOL, resamples=0)["round_validity"][1]["valid"],
+                        "a lost capacity-phase part does not invalidate the round")
+        packages[0]["missing_launches"] = ["slo-C4"]
+        validity = bs.analyze(packages, PROTOCOL, resamples=0)["round_validity"]
+        self.assertFalse(validity[1]["valid"])
+        self.assertIn("slo-C4: a part of the results package never arrived", validity[1]["problems"])
+        self.assertTrue(validity[2]["valid"])
 
 
 if __name__ == "__main__":

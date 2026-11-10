@@ -1,9 +1,10 @@
 """Client suites of the pre-registered serving protocol (slo_protocol.json, docs/BENCHMARK_PROTOCOL.md).
 
-Benchmark-only: entry.sh reaches this module through bench/protocol.sh for the slo-*, diag-*, cap-*, dx1-* and
-dx2-* phases; the demo and the older phases never import it.
+Benchmark-only: entry.sh reaches this module through bench/protocol.sh for the slo-*, diag-*, cap-*, dx1-*,
+dx2-* and scr-* phases; the demo and the older phases never import it.
 
-  python3 slo_suites.py plan --round N <PHASE_PLAN tokens>   expand `slo-round` into the round's phases
+  python3 slo_suites.py plan --round N [--layouts C4,D24] [--record F] <PHASE_PLAN tokens>
+                                                            expand `slo-round` into the round's phases
   python3 slo_suites.py phase-spec <phase> --round N [--json] server flags, environment and suites (bash)
   python3 slo_suites.py run --tag T --suites a,b --round N ...  run client suites against a server
 
@@ -14,8 +15,10 @@ paritylong   P1 for the two 32,768-token documents (run last in a phase).
 warmup       Discarded 32-request bursts per input length (seeds 9xxxxxx), then a prefix-cache reset.
 partr        Part R: the published 1K/8K/32K x concurrency 1/32 matrix with round seeds.
 slo          Closed-loop W1 (S1) and open-loop Poisson W1/W2 rate grids with --goodput.
-realtext     W1 lengths with real-text windows (A and C2).
+realtext     W1 lengths with real-text windows (FP8 layouts).
 soak         W1 at 0.8 x lambda* for 45 minutes (soak round only).
+screen       Screening (ROUND 0): start facts, short parity, warm-up, Part R and one Poisson W1 point (or a W1
+             ladder); every step fails softly.
 Other names (functional, ...) run from verify_suites.py.
 
 Every measured point waits for an idle server, resets the prefix cache (POST /reset_prefix_cache needs
@@ -45,6 +48,7 @@ if _ADDED:
 import verify_suites as vs  # noqa: E402  (aml/src: emit, call, server_healthy and the older suites)
 if _ADDED:
     sys.path.remove(_PARENT)
+from bench_stats import ordered, phase_entry, phase_suites, rates_key, resolve_layout, sensitivity_of  # noqa: E402,F401
 
 PROTOCOL = HERE / "slo_protocol.json"
 CORPUS = HERE / "parity_corpus.json"
@@ -95,40 +99,39 @@ def rate_order(round_, workload, count):
     return order
 
 
-def resolve_layout(protocol, name):
-    """A layout with its `same_as` chain applied: overrides replace, extra_args append; `root` names the base."""
-    layout = dict(protocol["layouts"][name])
-    if "same_as" not in layout:
-        return {**layout, "root": name}
-    base = resolve_layout(protocol, layout.pop("same_as"))
-    extra = layout.pop("extra_args", [])
-    base.update(layout)
-    base["args"] = [*base["args"], *extra]
-    return base
-
-
 def phase_spec(protocol, phase, round_=None):
     """Server flags, environment and client suites of a protocol phase (a PHASE_PLAN token). Every phase gets
     the same launcher and common flags, --max-num-seqs, --gpu-memory-utilization and --api-server-count;
-    performance phases share one --max-model-len, capacity phases fit it to the KV cache (-1)."""
-    entry = protocol["phases"][phase]
+    performance phases share one --max-model-len, capacity phases fit it to the KV cache (-1). A phase with
+    two servers runs `peer_args` on node1 behind lb_proxy.py: the same server (proxy lb) or, for a layout with
+    prefill/decode roles, the decode server (proxy pd)."""
+    entry = phase_entry(protocol, phase)
     layout = resolve_layout(protocol, entry["layout"])
     server = protocol["server"]
     length = server["max_model_len"][entry.get("max_model_len", "performance")]
     seqs = layout.get("max_num_seqs", server["max_num_seqs"])
     batched = layout.get("max_num_batched_tokens", server["max_num_batched_tokens"])
     options = entry.get("options", {})
+    replicas = entry.get("replicas", 1)
+    roles = layout.get("roles") or {}
+
+    def flags(extra):
+        return [*server["launcher_flags"], "--max-model-len", str(length), "--gpu-memory-utilization",
+                str(server["gpu_memory_utilization"]), "--max-num-seqs", str(seqs), *layout["args"], *extra,
+                "--max-num-batched-tokens", str(batched), *server["common_flags"]]
+
+    args = flags(roles.get("prefill", []))
+    suites = phase_suites(protocol, phase, round_)
     return {"phase": phase, "label": entry.get("label", entry["layout"]), "layout": entry["layout"],
-            "rates_key": "Dx2" if options.get("slo", {}).get("rate_set") == "dx2" else layout["root"],
-            "checkpoint": layout["checkpoint"], "nodes": layout["nodes"], "replicas": entry.get("replicas", 1),
+            "rates_key": "Dx2" if options.get("slo", {}).get("rate_set") == "dx2" else rates_key(protocol, entry["layout"]),
+            "checkpoint": layout["checkpoint"], "nodes": layout["nodes"], "replicas": replicas,
             "max_model_len": length, "max_num_seqs": seqs, "gpu_memory_utilization": server["gpu_memory_utilization"],
-            "max_num_batched_tokens": batched,
-            "args": [*server["launcher_flags"], "--max-model-len", str(length), "--gpu-memory-utilization",
-                     str(server["gpu_memory_utilization"]), "--max-num-seqs", str(seqs), *layout["args"],
-                     "--max-num-batched-tokens", str(batched), *server["common_flags"]],
+            "max_num_batched_tokens": batched, "args": args,
+            "peer_args": (flags(roles.get("decode", [])) if roles else args) if replicas > 1 else [],
+            "proxy": entry.get("proxy") or ("lb" if replicas > 1 else ""),
             "env": {**server["env"], **server["benchmark_env"], **layout.get("env", {})},
-            "suites": [s for s in entry["suites"] if s != "soak" or round_ == protocol["rounds"]["soak_round"]],
-            "options": options}
+            "node_env": list(layout.get("node_env", [])), "experimental": bool(layout.get("experimental")),
+            "length_fallback": "screen" in suites and length != -1, "suites": suites, "options": options}
 
 
 def shell_spec(spec):
@@ -137,30 +140,54 @@ def shell_spec(spec):
                "SPEC_CHECKPOINT": spec["checkpoint"], "SPEC_NODES": spec["nodes"], "SPEC_REPLICAS": spec["replicas"],
                "SPEC_LEN": spec["max_model_len"], "SPEC_SEQS": spec["max_num_seqs"],
                "SPEC_MEM": spec["gpu_memory_utilization"], "SPEC_BATCHED": spec["max_num_batched_tokens"],
+               "SPEC_PROXY": spec["proxy"], "SPEC_EXPERIMENTAL": int(spec["experimental"]),
+               "SPEC_FALLBACK": int(spec["length_fallback"]),
                "SPEC_SUITES": ",".join(spec["suites"]), "SPEC_OPTIONS": json.dumps(spec["options"])}
     lines = [f"{name}={shlex.quote(str(value))}" for name, value in scalars.items()]
     lines.append("SPEC_ARGS=(" + " ".join(shlex.quote(arg) for arg in spec["args"]) + ")")
+    lines.append("SPEC_PEER_ARGS=(" + " ".join(shlex.quote(arg) for arg in spec["peer_args"]) + ")")
     lines.append("SPEC_ENV=(" + " ".join(shlex.quote(f"{k}={v}") for k, v in sorted(spec["env"].items())) + ")")
+    lines.append("SPEC_NODE_ENV=(" + " ".join(shlex.quote(name) for name in spec["node_env"]) + ")")
     return "\n".join(lines)
 
 
-def round_plan(protocol, round_):
-    """A -> the round's pre-registered middle order -> sensitivity runs -> A2 -> capacity phases."""
-    rounds, key = protocol["rounds"], str(round_)
-    if key not in rounds["middle_order"]:
+def round_layouts(protocol, text=None):
+    """The candidates compared with A: ROUND_LAYOUTS ("C4,D24", printed by `bench_stats.py select`) or the
+    protocol's list. Each must be a layout of the table that is neither A, a sensitivity nor experimental."""
+    names = [n.strip() for n in (text or "").split(",") if n.strip()] or list(protocol["rounds"]["layouts"])
+    for name in names:
+        layout = resolve_layout(protocol, name) if name in protocol["layouts"] else None
+        if layout is None or layout["root"] == "A" or layout.get("sensitivity") or layout.get("experimental"):
+            raise ValueError(f"{name} cannot be a round candidate (unknown, A, sensitivity or experimental layout)")
+    if len(set(names)) != len(names):
+        raise ValueError(f"ROUND_LAYOUTS repeats a layout: {','.join(names)}")
+    return names
+
+
+def round_plan(protocol, round_, layouts=None):
+    """A -> the candidates in the round's order -> sensitivity runs (round 1) -> A2 -> capacity phases (round 1)."""
+    rounds, round_ = protocol["rounds"], int(round_)
+    if not 1 <= round_ <= rounds["maximum"]:
         raise ValueError(f"round {round_} is outside the pre-registered rounds 1..{rounds['maximum']}")
-    plan = ["slo-A", *(f"slo-{name}" for name in rounds["middle_order"][key])]
-    plan += [f"slo-{name}" for name, which in rounds["sensitivity"].items() if int(round_) in which]
-    return plan + ["slo-A2", *rounds["capacity_phases"].get(key, [])]
+    names = round_layouts(protocol, layouts) if layouts is None or isinstance(layouts, str) else list(layouts)
+    plan = ["slo-A", *(f"slo-{name}" for name in ordered(names, round_))]
+    if round_ in rounds["sensitivity_rounds"]:
+        plan += [f"slo-{sensitivity_of(protocol, name)}" for name in names if sensitivity_of(protocol, name)]
+    plan.append("slo-A2")
+    if round_ in rounds["capacity_rounds"]:
+        plan += ["cap-A", *(f"cap-{name}" for name in names)]
+    return plan
 
 
-def expand_plan(protocol, tokens, round_):
+def expand_plan(protocol, tokens, round_, layouts=None):
     """PHASE_PLAN with every `slo-round` token replaced by the round's phases; unknown tokens are refused."""
     expanded = []
     for token in tokens:
-        if token != "slo-round" and token not in protocol["phases"]:
-            raise ValueError(f"{token} is not a phase of slo_protocol.json")
-        expanded += round_plan(protocol, round_) if token == "slo-round" else [token]
+        if token == "slo-round":
+            expanded += round_plan(protocol, round_, layouts)
+        else:
+            phase_entry(protocol, token)
+            expanded.append(token)
     return expanded
 
 
@@ -427,6 +454,12 @@ def evaluate_gates(record, kind, gates):
     elif errors:
         flags.append(f"{errors} failed requests (SLO misses)")
     client, server = record.get("total_input_tokens"), totals.get("vllm:prompt_tokens_total")
+    per_engine = (record.get("deltas") or {}).get("per_engine", {})
+    if any(engine.startswith("decode:") for engine in per_engine):
+        # Prefill/decode disaggregation: the decode server receives every prompt again and reads its KV cache
+        # from the prefill server, so only the prefill server's count must match the client's.
+        server = sum(values.get("vllm:prompt_tokens_total", 0.0) for engine, values in per_engine.items()
+                     if not engine.startswith("decode:"))
     if not errors and client and server is not None and abs(server - client) > gates["prompt_token_tolerance"] * client:
         failed.append(f"the server counted {server:.0f} prompt tokens, the client {client}")
     queries, hits = totals.get("vllm:prefix_cache_queries_total") or 0, totals.get("vllm:prefix_cache_hits_total") or 0
@@ -513,13 +546,15 @@ def run_points(args, suite, points, protocol, method):
     return {"method": method, "plan": plan, "points": results}
 
 
-def partr_points(protocol, round_, subset=None):
-    """Part R: the published matrix with round seeds; 32K x 32 only in the rounds the protocol lists."""
+def partr_points(protocol, round_, subset=None, all_rounds=False):
+    """Part R: the published matrix with round seeds; 32K x 32 only in the rounds the protocol lists (every
+    point with all_rounds, as the screening runs it)."""
     workload = protocol["workloads"]["R"]
     wanted = set(workload["subsets"][subset]) if subset else None
     points = []
     for index, item in enumerate(workload["points"]):
-        if (item.get("rounds") and round_ not in item["rounds"]) or (wanted is not None and item["name"] not in wanted):
+        if (item.get("rounds") and round_ not in item["rounds"] and not all_rounds) or \
+                (wanted is not None and item["name"] not in wanted):
             continue
         points.append({"name": f"R-{item['name']}", "key": item["name"], "index": index, "workload": "R",
                        "kind": "closed", "concurrency": item["concurrency"], "prompts": item["prompts"],
@@ -758,8 +793,92 @@ def suite_paritylong(args):
     return parity_summary(raw, path)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Screening
+
+def screen_facts(base):
+    """What the server reports about itself: the served max_model_len and, per engine, the KV cache size in
+    tokens (vllm:cache_config_info: num_gpu_blocks x block_size)."""
+    models, _ = vs.call(base, "/v1/models", None, 60)
+    kv = {}
+    for name, labels, _ in parse_prometheus(fetch_metrics(base, timeout=30)):
+        if name == "vllm:cache_config_info" and str(labels.get("num_gpu_blocks", "")).isdigit():
+            kv[engine_key(labels)] = int(labels["num_gpu_blocks"]) * int(labels.get("block_size") or 0)
+    return {"max_model_len": models["data"][0].get("max_model_len"), "kv_tokens_per_engine": kv}
+
+
+def screen_parity(args, protocol):
+    """P1 for the screening documents cut to 2,048 tokens and P2 for their first 512 tokens (128 greedy tokens);
+    bench_stats.py compares the raw data with the job's first launch."""
+    settings = protocol["screen"]["parity"]
+    documents = {doc["id"]: doc for doc in json.loads(CORPUS.read_text(encoding="utf-8"))["documents"]}
+    raw = {**parity_raw(args, False), "screen": True}
+    ids = {name: tokenize(args.base, documents[name]["text"], True) for name in settings["documents"]}
+    reset_prefix_cache(args.base)
+    for name in settings["documents"]:
+        raw["p1"][name] = teacher_forced(args.base, name, ids[name][:settings["tokens"]])
+    reset_prefix_cache(args.base)
+    for name in settings["documents"]:
+        raw["p2"][f"{name}@0"] = greedy(args.base, f"{name}@0", ids[name][:settings["greedy_prompt_tokens"]],
+                                        settings["greedy_tokens"])
+    reset_prefix_cache(args.base)
+    path = Path(args.out_dir) / f"parity-{args.tag}.json"
+    path.write_text(json.dumps(raw))
+    return {**parity_summary(raw, path), "method": "screening parity: P1 and short P2 of four documents; "
+                                                   "bench_stats.py compares them with the job's first launch"}
+
+
+def screen_points(protocol, round_, ladder=None):
+    """Every Part R point (the 32K x 32 capacity point with few output tokens), then the W1 point of the
+    screening or a whole W1 ladder (W1 grid or a rate set) in the round's rate order."""
+    screen, workload = protocol["screen"], protocol["workloads"]["W1"]
+    points = partr_points(protocol, round_, all_rounds=True)
+    for point in points:
+        if point["key"] == screen["partr"]["capacity_point"]:
+            point.update(output_len=screen["partr"]["capacity_output_len"], capacity_point=True)
+    if ladder:
+        grid = workload["rates"] if ladder == "W1" else protocol["rate_sets"][ladder]["W1"]
+        return points + [open_point(protocol, round_, "W1", i, grid[i]) for i in rate_order(round_, workload["id"], len(grid))]
+    return points + [open_point(protocol, round_, "W1", screen["w1"]["point"], screen["w1"]["rate"])]
+
+
+def suite_screen(args):
+    """One screening launch: start facts, short parity, warm-up, Part R and Poisson W1. Each step that fails is
+    recorded and the next one runs while the server answers /health."""
+    protocol = protocol_context(args)
+    screen = protocol["screen"]
+    if args.round != screen["round"]:
+        raise ValueError(f"the screening runs with ROUND={screen['round']}, apart from the rounds' seeds")
+    steps, result = {}, {"method": screen["description"]}
+
+    def step(name, function):
+        began = time.time()
+        try:
+            value = function()
+            steps[name] = {"ok": True}
+            return value
+        except Exception as exc:
+            steps[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:1000]}
+            return None
+        finally:
+            steps[name]["seconds"] = round(time.time() - began, 1)
+
+    result["facts"] = step("facts", lambda: screen_facts(args.base))
+    result["parity"] = step("parity", lambda: screen_parity(args, protocol))
+    step("warmup", lambda: suite_warmup(args))
+    points = screen_points(protocol, args.round, args.options.get("screen", {}).get("ladder"))
+    data = None
+    if vs.server_healthy(args.base):
+        data = step("points", lambda: run_points(args, "screen", points, protocol, "Part R and Poisson W1"))
+    result.update(plan=[p["name"] for p in points], points=(data or {}).get("points", []), steps=steps)
+    if data is None or data.get("aborted"):
+        result["aborted"] = ((data or {}).get("aborted") or steps.get("points", {}).get("error")
+                             or "the server stopped answering /health before the points")
+    return result
+
+
 SUITES = {"parity": suite_parity, "paritylong": suite_paritylong, "warmup": suite_warmup, "partr": suite_partr,
-          "slo": suite_slo, "soak": suite_soak, "realtext": suite_realtext}
+          "slo": suite_slo, "soak": suite_soak, "realtext": suite_realtext, "screen": suite_screen}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -794,6 +913,8 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan", help="expand PHASE_PLAN tokens (slo-round) for a round")
     plan.add_argument("names", nargs="*")
+    plan.add_argument("--layouts", default="", help="ROUND_LAYOUTS: the candidates compared with A (default: the protocol's)")
+    plan.add_argument("--record", help="also write {round, layouts, plan} to this JSON file (for the package)")
     spec = commands.add_parser("phase-spec", help="settings of one protocol phase")
     spec.add_argument("name")
     spec.add_argument("--json", action="store_true")
@@ -822,7 +943,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     protocol = load_protocol(args.protocol)
     if args.command == "plan":
-        print(" ".join(expand_plan(protocol, args.names, args.round)))
+        layouts = round_layouts(protocol, args.layouts)
+        expanded = expand_plan(protocol, args.names, args.round, layouts)
+        if args.record:
+            Path(args.record).write_text(json.dumps({"round": args.round, "tokens": args.names, "plan": expanded,
+                                                     "layouts": layouts if "slo-round" in args.names else []}))
+        print(" ".join(expanded))
         return 0
     if args.command == "phase-spec":
         settings = phase_spec(protocol, args.name, args.round)

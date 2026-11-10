@@ -1,0 +1,50 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: serving-screen-nvfp4-2xND96amsr-A100
+description: >-
+  Screening of the two-node patterns of the official skt/A.X-K2-NVFP4 (SM80 Marlin port) on two 8xA100-80GB
+  nodes (docs/BENCHMARK_PROTOCOL.md, screening): Dx1 (D, TP8, on node0 alone; the parity reference), Dx2 (one
+  D per node behind lb_proxy.py, least outstanding requests) and last PD, experimental (prefill server on node0,
+  decode server on node1, vLLM NixlConnector; lb_proxy.py sends each request to prefill with max_tokens 1, then
+  to decode with the returned kv_transfer_params; a smoke request must pass first and its client is limited to
+  90 min). Each launch records start facts, short parity against Dx1, Part R and a Poisson W1 ladder (Dx1:
+  0.25-1.5 req/s; Dx2 and PD: 0.5-3.0 req/s); node1's server-log tail is kept; every failure is recorded and the
+  job goes on. Results reach the job record after every phase (slo.package). Expected about 4 h (setup and
+  downloads 0.4 h, 3 launches of 60-70 min); timeout 7 h. ROUND 0 keeps the seeds apart from the rounds. The
+  scripts are downloaded from the pinned commit of this public repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 2
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  FULL_REPO: skt/A.X-K2-NVFP4
+  NVFP4_SM80_PORT: "1"
+  PHASE_PLAN: "scr-Dx1 scr-Dx2 scr-PD"
+  ROUND: "0"
+  IB_PROBE: "1"
+  FULL_HEALTH_TIMEOUT: "1200"
+  DOWNLOAD_TIMEOUT: "5400"
+  RUN_KERNEL_TESTS: "0"
+  JOIN_TIMEOUT: "5400"
+  TP: "8"
+  PP: "2"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:9e2e804e80f8d1b3afba5d7938173cec1ed46b49
+limits:
+  timeout: 25200

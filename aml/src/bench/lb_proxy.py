@@ -1,15 +1,28 @@
-"""Least-outstanding-requests HTTP load balancer for the D x 2 benchmark (two independent vLLM servers).
+"""HTTP proxies of the benchmark protocol, standard library only.
 
+Load balancer for D x 2 (two independent vLLM servers):
   python3 lb_proxy.py --listen 127.0.0.1:8100 --backend http://127.0.0.1:8000 --backend http://<node1>:8000
-
 Each request goes to the healthy backend with the fewest requests in flight (ties in round-robin order); the
-response, including server-sent events, is passed through chunk by chunk as it arrives. The proxy answers
-itself:
+response, including server-sent events, is passed through chunk by chunk as it arrives.
+
+Prefill/decode disaggregation for PD (vLLM 0.23 NixlConnector, the protocol of vLLM's
+tests/v1/kv_connector/nixl_integration/toy_proxy_server.py):
+  python3 lb_proxy.py --listen 127.0.0.1:8100 --prefill http://127.0.0.1:8000 --decode http://<node1>:8000
+A completion first goes to the prefill server with max_tokens 1, no streaming and kv_transfer_params
+{"do_remote_decode": true, ...}; the kv_transfer_params of its answer then go with the unchanged request to the
+decode server, which reads the KV cache from the prefill server and streams the answer back through the proxy.
+Requests with prompt_logprobs (P1 parity) and every other path go to the prefill server alone.
+
+  python3 lb_proxy.py --smoke http://127.0.0.1:8100
+One short completion (16 tokens) through a running proxy, then its /lb/stats: exit 0 only when the answer came
+back and the proxy counted no failure and no prefill answer without kv_transfer_params (the PD smoke test).
+
+Both proxies answer themselves:
   GET  /health              200 when every backend answers its /health (503 otherwise)
-  GET  /lb/stats            requests routed, in flight and failed per backend
-  GET  /metrics             every backend's /metrics, each sample labelled replica="<backend index>"
+  GET  /lb/stats            requests routed, in flight and failed per backend (and the two-step counts of PD)
+  GET  /metrics             every backend's /metrics, each sample labelled replica="<backend index or role>"
   POST /reset_prefix_cache  sent to every backend; 200 only if every backend accepted it
-HTTP/1.1 with one request per connection (Connection: close on both sides); standard library only.
+HTTP/1.1 with one request per connection (Connection: close on both sides).
 """
 import argparse
 import asyncio
@@ -18,23 +31,27 @@ import json
 import re
 import sys
 import time
+import urllib.request
+import uuid
 from urllib.parse import urlsplit
 
 HOP_HEADERS = {"connection", "keep-alive", "proxy-connection", "transfer-encoding", "content-length", "host", "upgrade",
                "te", "trailer"}
 SAMPLE = re.compile(r"^([A-Za-z_:][A-Za-z0-9_:]*)(\{.*\})?(\s.*)$")
+COMPLETIONS = ("/v1/completions", "/v1/chat/completions")
 
 
 class Backend:
-    def __init__(self, index, url):
+    def __init__(self, index, url, name=None):
         parts = urlsplit(url)
         self.index, self.url, self.host, self.port = index, url.rstrip("/"), parts.hostname, parts.port or 80
+        self.name = str(index) if name is None else name
         self.in_flight = self.routed = self.failed = 0
         self.healthy = False
 
     def stats(self):
-        return {"backend": self.index, "url": self.url, "healthy": self.healthy, "in_flight": self.in_flight,
-                "routed": self.routed, "failed": self.failed}
+        return {"backend": self.index, "name": self.name, "url": self.url, "healthy": self.healthy,
+                "in_flight": self.in_flight, "routed": self.routed, "failed": self.failed}
 
 
 def label_metrics(text, replica, keep_comments=True):
@@ -96,8 +113,10 @@ async def request(backend, method, path, body=b"", headers=(), timeout=10.0):
 
 
 class Balancer:
-    def __init__(self, urls, health_interval=2.0):
-        self.backends = [Backend(index, url) for index, url in enumerate(urls)]
+    policy = "least outstanding requests, ties round-robin"
+
+    def __init__(self, urls, health_interval=2.0, names=None):
+        self.backends = [Backend(index, url, (names or [None] * len(urls))[index]) for index, url in enumerate(urls)]
         self.turn = itertools.count()
         self.health_interval = health_interval
         self.started = time.time()
@@ -143,13 +162,14 @@ class Balancer:
                 ok = all(b.healthy for b in self.backends)
                 await self.respond(writer, 200 if ok else 503, json.dumps({"healthy": ok}))
             elif method == "GET" and path == "/lb/stats":
-                await self.respond(writer, 200, json.dumps({"policy": "least outstanding requests, ties round-robin",
+                await self.respond(writer, 200, json.dumps({"policy": self.policy,
                                                             "uptime_seconds": round(time.time() - self.started, 1),
-                                                            "backends": [b.stats() for b in self.backends]}))
+                                                            "backends": [b.stats() for b in self.backends],
+                                                            **self.extra_stats()}))
             elif method == "GET" and path == "/metrics":
                 pages = await asyncio.gather(*(request(b, "GET", "/metrics") for b in self.backends),
                                              return_exceptions=True)
-                parts = [label_metrics(page[1].decode(), b.index, keep_comments=b.index == 0)
+                parts = [label_metrics(page[1].decode(), b.name, keep_comments=b.index == 0)
                          for b, page in zip(self.backends, pages) if not isinstance(page, Exception) and page[0] == 200]
                 status = 200 if len(parts) == len(self.backends) else 502
                 await self.respond(writer, status, "\n".join(parts) + "\n", "text/plain; version=0.0.4")
@@ -166,11 +186,18 @@ class Balancer:
             except Exception:
                 pass
 
+    def extra_stats(self):
+        return {}
+
     async def forward(self, method, target, headers, body, writer):
         backend = self.pick()
         if backend is None:
             await self.respond(writer, 503, json.dumps({"error": "no healthy backend"}))
             return
+        await self.relay(backend, method, target, headers, body, writer)
+
+    async def relay(self, backend, method, target, headers, body, writer):
+        """Sends one request to a backend and passes its response through chunk by chunk."""
         backend.in_flight += 1
         backend.routed += 1
         try:
@@ -179,7 +206,7 @@ class Balancer:
             backend.in_flight -= 1
             backend.failed += 1
             backend.healthy = False
-            await self.respond(writer, 502, json.dumps({"error": f"backend {backend.index} unreachable"}))
+            await self.respond(writer, 502, json.dumps({"error": f"backend {backend.name} unreachable"}))
             return
         try:
             kept = [(n, v) for n, v in headers if n.lower() not in HOP_HEADERS]
@@ -207,9 +234,92 @@ class Balancer:
             upstream_writer.close()
 
 
-async def serve(listen, urls, ready=None):
+class Disaggregated(Balancer):
+    """Prefill/decode disaggregation: backends[0] prefills (kv_producer), backends[1] decodes (kv_consumer)."""
+    policy = "prefill then decode (vLLM NixlConnector kv_transfer_params)"
+
+    def __init__(self, prefill, decode, health_interval=2.0, prefill_timeout=3600.0):
+        super().__init__([prefill, decode], health_interval, names=["prefill", "decode"])
+        self.prefill_timeout = prefill_timeout
+        self.counts = {"disaggregated": 0, "prefill_only": 0, "prefill_failed": 0, "missing_kv_transfer_params": 0}
+        self.prefill_seconds = 0.0
+
+    def extra_stats(self):
+        done = self.counts["disaggregated"]
+        return {"pd": {**self.counts, "prefill_seconds_mean": round(self.prefill_seconds / done, 4) if done else None}}
+
+    async def forward(self, method, target, headers, body, writer):
+        prefill, decode = self.backends
+        try:
+            payload = json.loads(body) if method == "POST" and target.split("?", 1)[0] in COMPLETIONS else None
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict) or payload.get("prompt_logprobs") is not None:
+            self.counts["prefill_only"] += 1
+            await self.relay(prefill, method, target, headers, body, writer)
+            return
+        first = {k: v for k, v in payload.items() if k not in ("stream_options", "min_tokens", "min_completion_tokens")}
+        first.update(stream=False, max_tokens=1, kv_transfer_params={
+            "do_remote_decode": True, "do_remote_prefill": False, "remote_engine_id": None, "remote_block_ids": None,
+            "remote_host": None, "remote_port": None})
+        if "max_completion_tokens" in payload:
+            first["max_completion_tokens"] = 1
+        kept = [(n, v) for n, v in headers if n.lower() not in HOP_HEADERS and n.lower() != "x-request-id"]
+        kept.append(("X-Request-Id", next((v for n, v in headers if n.lower() == "x-request-id"), uuid.uuid4().hex)))
+        began = time.time()
+        prefill.in_flight += 1
+        prefill.routed += 1
+        try:
+            status, data = await request(prefill, "POST", target, json.dumps(first).encode(), kept, self.prefill_timeout)
+        except Exception as exc:
+            status, data = None, json.dumps({"error": f"prefill failed: {type(exc).__name__}"}).encode()
+        finally:
+            prefill.in_flight -= 1
+        if status != 200:
+            prefill.failed += 1
+            self.counts["prefill_failed"] += 1
+            await self.respond(writer, status or 502, data)
+            return
+        self.prefill_seconds += time.time() - began
+        self.counts["disaggregated"] += 1
+        try:
+            params = json.loads(data).get("kv_transfer_params")
+        except (ValueError, AttributeError):
+            params = None
+        if params:
+            payload["kv_transfer_params"] = params
+        else:
+            self.counts["missing_kv_transfer_params"] += 1
+        await self.relay(decode, method, target, kept, json.dumps(payload).encode(), writer)
+
+
+def smoke(url, timeout=180.0, model="axk2"):
+    """(ok, reason) of one short greedy completion through a running proxy and of the proxy's counters after it."""
+    body = json.dumps({"model": model, "prompt": "The capital of Korea is", "max_tokens": 16, "temperature": 0,
+                       "stream": False}).encode()
+    request = urllib.request.Request(url.rstrip("/") + "/v1/completions", data=body,
+                                     headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            answer = json.loads(response.read())
+        with urllib.request.urlopen(url.rstrip("/") + "/lb/stats", timeout=30) as response:
+            stats = json.loads(response.read())
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"[:300]
+    pd = stats.get("pd") or {}
+    if not answer.get("choices"):
+        return False, "the answer has no choices"
+    if pd.get("missing_kv_transfer_params"):
+        return False, f"{pd['missing_kv_transfer_params']} prefill answers carried no kv_transfer_params"
+    failed = {b.get("name", b.get("backend")): b["failed"] for b in stats.get("backends", []) if b.get("failed")}
+    if pd.get("prefill_failed") or failed:
+        return False, f"the proxy counted failed requests: {failed or pd.get('prefill_failed')}"
+    return True, "ok"
+
+
+async def serve(listen, urls=None, ready=None, prefill=None, decode=None):
     host, port = listen.rsplit(":", 1)
-    balancer = Balancer(urls)
+    balancer = Disaggregated(prefill, decode) if prefill else Balancer(urls)
     await asyncio.gather(*(balancer.check(b) for b in balancer.backends))
     server = await asyncio.start_server(balancer.handle, host, int(port))
     health = asyncio.ensure_future(balancer.health_loop())
@@ -225,10 +335,20 @@ async def serve(listen, urls, ready=None):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--listen", default="127.0.0.1:8100")
-    parser.add_argument("--backend", action="append", required=True, help="http://host:port (repeat)")
+    parser.add_argument("--backend", action="append", help="http://host:port (repeat): least outstanding requests")
+    parser.add_argument("--prefill", help="http://host:port of the prefill server (with --decode)")
+    parser.add_argument("--decode", help="http://host:port of the decode server (with --prefill)")
+    parser.add_argument("--smoke", help="http://host:port of a running proxy: one short request, then its stats")
+    parser.add_argument("--smoke-timeout", type=float, default=180.0)
     args = parser.parse_args(argv)
+    if args.smoke:
+        ok, reason = smoke(args.smoke, args.smoke_timeout)
+        print(json.dumps({"ok": ok, "reason": reason}))
+        return 0 if ok else 1
+    if bool(args.prefill) != bool(args.decode) or bool(args.prefill) == bool(args.backend):
+        parser.error("give --backend (repeatable) or both --prefill and --decode")
     try:
-        asyncio.run(serve(args.listen, args.backend))
+        asyncio.run(serve(args.listen, args.backend, prefill=args.prefill, decode=args.decode))
     except KeyboardInterrupt:
         return 0
     return 0
