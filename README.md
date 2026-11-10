@@ -31,6 +31,7 @@ SKT의 4-bit NVFP4 checkpoint도 upstream vLLM 변경을 backport한 뒤 이런 
   병렬 구성 7종의 속도·용량 결과, 측정으로 확인한 사실, 해석(측정 아님), 한계를 정리했다.
 - [docs/report/REPORT.md](docs/report/REPORT.md): 고객용 기술 보고서이다.
 - [docs/report/REVIEW_2026-11-09.md](docs/report/REVIEW_2026-11-09.md): 2026-11-09 서빙 실험 검토 결과(판정, 문서 정정 내역, 재측정 계획)이다.
+- [docs/report/SCREENING_2026-11-10.md](docs/report/SCREENING_2026-11-10.md): 2026-11-10 A100 서빙 패턴 스크리닝 결과(배치 23종 시도, 실패 원인, 본 라운드 후보)이다.
 - [docs/SERVING_DESIGN.md](docs/SERVING_DESIGN.md): 설계와 실험별 상세 결과이다.
 
 | 실험 | 날짜 | 핵심 결과 | 자세히 |
