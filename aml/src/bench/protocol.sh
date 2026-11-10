@@ -455,9 +455,11 @@ bench_peer_facts() {
   return 0
 }
 
-# bench_preflight <tag>: nixl_preflight.py on node0 and node1 (a Ray task pinned there), with the defaults and with
-# UCX_MEMTYPE_CACHE=n, each run limited to 120 s; $OUT/preflight-<tag>.json, reported. Prints the PD servers'
-# environment: "default", "UCX_MEMTYPE_CACHE=n", or "none: <reason>" when neither passes on both nodes.
+# bench_preflight <tag>: nixl_preflight.py on node0 and node1 (a Ray task pinned there) with the job's UCX
+# environment, then UCX_TLS=all UCX_NET_DEVICES=all, then those and UCX_MEMTYPE_CACHE=n (node_tools.py), each run
+# limited to 120 s; $OUT/preflight-<tag>.json (the job's UCX_* values per node and the choice), reported. Prints the
+# PD servers' environment: "job", the UCX assignments of the first variant that passes on both nodes, or
+# "none: <reason>".
 bench_preflight() {
   timeout 600 python3 "$BENCH/node_tools.py" preflight "$OUT/preflight-$1.json" "${NODE_IP:-}" "$BENCH/nixl_preflight.py" \
     --timeout 120 2>/dev/null | tail -n 1
@@ -487,6 +489,7 @@ bench_pd_descs() {
 protocol_phase() {
   local name=$1 began spec model len rc commit base=http://127.0.0.1:8000 peer="" lb="" note="" rates_var
   local fallback=null fitted requested i events="" smoke reason reclaimed short="" pd_env="" debug
+  local -a ucx=()
   local -a limit=()
   local SPEC_LABEL SPEC_LAYOUT SPEC_RATES_KEY SPEC_CHECKPOINT SPEC_NODES SPEC_REPLICAS SPEC_LEN SPEC_SEQS SPEC_MEM
   local SPEC_BATCHED SPEC_SUITES SPEC_OPTIONS SPEC_PROXY SPEC_LAUNCHER SPEC_EXPERIMENTAL SPEC_FALLBACK
@@ -517,8 +520,9 @@ protocol_phase() {
   if [ "$SPEC_PROXY" = pd ]; then
     pd_env=$(bench_preflight "$name")
     case "$pd_env" in
-      default) events="${events:+$events; }NIXL preflight passed with the defaults" ;;
-      UCX_MEMTYPE_CACHE=n) SPEC_ENV+=("$pd_env"); events="${events:+$events; }NIXL preflight passed with $pd_env only" ;;
+      job) events="${events:+$events; }NIXL preflight passed with the job's UCX environment" ;;
+      UCX_*) read -ra ucx <<< "$pd_env"; SPEC_ENV+=("${ucx[@]}")  # both servers: node0's env and node1's actor
+             events="${events:+$events; }NIXL preflight passed with $pd_env" ;;
       *) reason=${pd_env#none: }; note="PD not possible here: NIXL preflight failed (${reason:-no answer within 600 s})" ;;
     esac
   fi
@@ -540,7 +544,7 @@ protocol_phase() {
     note=""
     bench_launch "$name" "$model"
   fi
-  if [ -n "$note" ] && { [ "$pd_env" = default ] || [ "$pd_env" = UCX_MEMTYPE_CACHE=n ]; } && bench_vram_host "$name"; then
+  if [ -n "$note" ] && [[ $pd_env == job || $pd_env == UCX_* ]] && bench_vram_host "$name"; then
     log "[$name] UCX typed the KV cache's VRAM as host memory although the preflight passed; one debug relaunch"
     bench_replica stop > "$OUT/replica-$name-vram-stop.json" 2>&1
     bench_stop

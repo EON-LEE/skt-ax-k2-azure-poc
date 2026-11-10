@@ -7,9 +7,11 @@ description: >-
   nodes after the screening's PD start failure (NIXL_ERR_BACKEND, "VRAM memory is detected as host by UCX";
   docs/BENCHMARK_PROTOCOL.md, screening): Dref first (D, TP8, on node0 alone; start facts and short parity only,
   the parity reference), then PD (prefill server on node0, decode server on node1, vLLM NixlConnector). Before PD
-  starts, nixl_preflight.py registers VRAM through NIXL on both nodes, with the defaults and with
-  UCX_MEMTYPE_CACHE=n; the servers get the first variant that passes on both, and PD is skipped and recorded
-  when neither does (UCX_TLS is never set). If UCX still types the KV cache as host memory, both servers
+  starts, nixl_preflight.py registers VRAM through NIXL on both nodes with the job's UCX environment (the job
+  runtime's UCX_TLS=tcp, UCX_NET_DEVICES=eth0 failed the first rerun: no cuda_copy), then with UCX_TLS=all and
+  UCX_NET_DEVICES=all, then with UCX_MEMTYPE_CACHE=n as well; both servers get exactly the first variant that
+  passes on both nodes, and PD is skipped and recorded when none does (never a restricted UCX_TLS list). If UCX
+  still types the KV cache as host memory, both servers
   relaunch once with debug logging, their "Registering descs" lines go to the failure report and the phase
   stops. Otherwise PD runs its smoke request, Part R and the dx2 ladder (0.5-3.0 req/s) under a 90-min client
   limit; its comparisons with Dx1 and Dx2 come from the earlier two-node job (cross-job). Results reach the job

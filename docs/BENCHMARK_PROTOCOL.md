@@ -144,7 +144,7 @@ FP8 A와 라운드 후보(기본값은 FP8 C2와 NVFP4 D)를 반복 측정한다
 | D8 | NVFP4 | 1 | 1,024 | `--data-parallel-size 8 --data-parallel-size-local 8 --tensor-parallel-size 1 --data-parallel-backend mp --distributed-executor-backend mp --enable-expert-parallel --all2all-backend allgather_reducescatter` |
 | D24 | NVFP4 | 1 | 8,192 | D8과 같고 `--data-parallel-size 2 --data-parallel-size-local 2 --tensor-parallel-size 4` |
 | D42 | NVFP4 | 1 | 8,192 | `--tensor-parallel-size 4 --pipeline-parallel-size 2 --distributed-executor-backend mp` |
-| PD | NVFP4 | 2 | 서버마다 8,192 | 서버마다 D의 플래그와 `--kv-transfer-config`(프리필 `kv_producer`, 디코드 `kv_consumer`, `kv_load_failure_policy` `fail`, `kv_connector` `NixlConnector`). `VLLM_NIXL_SIDE_CHANNEL_PORT=5600`, `UCX_NET_DEVICES=all`, `VLLM_NIXL_SIDE_CHANNEL_HOST`는 그 서버가 도는 노드의 주소 |
+| PD | NVFP4 | 2 | 서버마다 8,192 | 서버마다 D의 플래그와 `--kv-transfer-config`(프리필 `kv_producer`, 디코드 `kv_consumer`, `kv_load_failure_policy` `fail`, `kv_connector` `NixlConnector`). `VLLM_NIXL_SIDE_CHANNEL_PORT=5600`, `VLLM_NIXL_SIDE_CHANNEL_HOST`는 그 서버가 도는 노드의 주소. UCX 환경은 NIXL 사전 점검이 고른 값(6.5절) |
 
 **DP×EP 구성의 배치 토큰 규칙**
 
@@ -195,14 +195,20 @@ PD는 실험 단계다. 실패하면 "experimental phase:"로 시작하는 기�
 
 - 측정: 스크리닝(main 5dc653b)의 `scr-PD`는 기동 중 `register_kv_caches`에서 실패했다. NIXL 오류는 `NIXL_ERR_BACKEND`였고, UCX가 "VRAM memory is detected as host by UCX"를 냈다.
 - 확인: 이미지의 nixl-cu12 1.2.0에는 CUDA를 지원하도록 빌드한 UCX 1.21.0이 들어 있다. 다시 빌드할 필요는 없다.
-- 남은 원인(추정): 첫째, UCX의 메모리 종류 캐시가 GPU 할당을 놓쳤을 수 있다. 대책은 `UCX_MEMTYPE_CACHE=n`이다. 둘째, SM80 포트가 길이 0인 KV 서술자를 등록했을 수 있다. UCX는 길이 0인 등록을 호스트 메모리로 분류한다. UCX의 CUDA 모듈이 적재되지 않았을 가능성은 낮다. 로그에 "UCX CUDA support was not found" 경고가 없다.
-- `UCX_TLS`는 설정하지 않는다. 설정하면 InfiniBand 전송이 빠진다.
+- 측정(PD 재실행, main 2d104e4): NIXL 사전 점검이 두 노드 모두에서 작업 환경 그대로일 때와 `UCX_MEMTYPE_CACHE=n`일 때 실패했다. 길이 0 대조군을 포함한 모든 등록이 `NIXL_ERR_BACKEND`였다. 로더 캐시에는 `libcuda`, `libnvidia-ml`, `libcudart`가 있었고 `libuct_cuda`도 적재되어 있었다.
+- 측정: 사전 점검의 환경 기록에 따르면 작업 환경에 `UCX_TLS=tcp`와 `UCX_NET_DEVICES=eth0`이 있었다.
+- 추정: 이미지와 이 하네스는 두 값을 설정하지 않는다. 따라서 Azure ML 작업 런타임이 넣은 값으로 본다.
+- 원인: `UCX_TLS=tcp`에는 `cuda_copy`가 빠져 있다. 그래서 UCX가 VRAM을 호스트 메모리로 분류했다. 첫 진단의 가설 중 "UCX가 CUDA 지원을 쓰지 못한다"에 해당한다. `UCX_MEMTYPE_CACHE=n`으로도 실패했으므로 메모리 종류 캐시는 원인이 아니다. 길이 0 서술자 가설은 이 결과로 배제되지 않는다. 대책을 적용한 뒤에도 실패하면 디버그 재기동(아래 4번)이 확인한다.
+- 대책: 두 서버에 `UCX_TLS=all`과 `UCX_NET_DEVICES=all`을 준다. vLLM의 `docs/features/nixl_connector_usage.md`가 권장하는 값이다. 전송 종류를 제한하는 `UCX_TLS` 목록은 쓰지 않는다. 제한 목록은 InfiniBand나 CUDA 전송을 뺄 수 있다.
 
 PD 재실행 작업(`serving-screen-nvfp4-pd-nd96.yml`)의 PD 단계는 다음 순서로 실행한다.
 
-1. 서버를 띄우기 전에 `nixl_preflight.py`를 node0과 node1에서 실행한다. node1에서는 그 노드에 고정한 Ray 작업이 실행한다. 기본 환경으로 한 번, `UCX_MEMTYPE_CACHE=n`으로 한 번 실행하고, 실행마다 120초로 제한한다.
+1. 서버를 띄우기 전에 `nixl_preflight.py`를 node0과 node1에서 실행한다. node1에서는 그 노드에 고정한 Ray 작업이 실행한다. 다음 환경을 차례로 시험하고, 실행마다 120초로 제한한다.
+   1. 작업 환경 그대로
+   2. `UCX_TLS=all`, `UCX_NET_DEVICES=all`
+   3. 2번과 `UCX_MEMTYPE_CACHE=n`
 2. 사전 점검은 GPU 1개에서 다음을 확인한다. 로더 캐시의 `libcuda`, `libnvidia-ml`, `libcudart`, NIXL 에이전트를 만든 뒤 UCX CUDA 전송(`libuct_cuda`)의 적재, 첫 등록 전과 후에 할당한 GPU 메모리의 VRAM 등록, 길이 0 서술자(대조군, 실패가 정상)다. 결과는 JSON 한 줄이고, 환경 변수는 `UCX_*`와 `NIXL_*`만 기록한다.
-3. 기본 환경이 두 노드에서 통과하면 두 서버를 기본 환경으로 띄운다. 기본 환경이 통과하지 못하고 `UCX_MEMTYPE_CACHE=n`이 두 노드에서 통과하면 두 서버에 그 값을 준다. 둘 다 통과하지 못하면 서버를 띄우지 않고 "experimental phase: PD not possible here: NIXL preflight failed (<이유>)"를 기록한다. 사전 점검 결과는 `node0.<단계>.preflight`와 결과 꾸러미에 남는다.
+3. 두 노드에서 처음으로 통과한 환경을 두 서버에 똑같이 준다. 서버와 사전 점검이 같은 UCX 값을 쓴다. 어느 환경도 통과하지 못하면 서버를 띄우지 않고 "experimental phase: PD not possible here: NIXL preflight failed (<이유>)"를 기록한다. `node0.<단계>.preflight`와 결과 꾸러미에는 노드마다 작업 환경의 `UCX_*` 값과 고른 환경이 남는다.
 4. 사전 점검을 통과했는데도 기동이 "VRAM memory is detected as host"로 실패하면, 두 서버를 `VLLM_LOGGING_LEVEL=DEBUG`로 한 번 다시 띄운다. 두 로그의 "Registering descs" 줄과 길이 0 서술자 수를 `node0.<단계>.failure`에 넣고 단계를 끝낸다. 측정 스위트는 실행하지 않는다.
 5. 기동에 성공하면 확인 요청, Part R, dx2 격자를 위와 같이 실행한다.
 
@@ -606,6 +612,7 @@ NVFP4 품질 검증을 통과한 뒤 실행한다. 스크리닝의 `scr-Dx2`가 
 - 회수는 규칙에 맞는 프로세스, placement group, 포트만 정리한다. 규칙에 맞지 않는 GPU 프로세스, 프로세스 없이 남은 GPU 메모리, GPU 오류는 회수하지 못한다. 그러면 단계는 실패로 기록된다.
 - NIXL 사전 점검은 노드마다 GPU 0 하나만 검사한다. PD 서버는 노드마다 GPU 8개를 쓴다.
 - `UCX_MEMTYPE_CACHE=n`은 UCX가 메모리 종류를 매번 확인하게 하므로 전송이 느려질 수 있다(추정). 이 값으로 띄운 PD는 단계 기록에 그 사실이 남는다.
+- 작업 런타임이 `UCX_TLS=tcp`, `UCX_NET_DEVICES=eth0`을 넣는 이유는 확인하지 않았다. PD 서버만 이 값을 덮어쓰고, 다른 단계는 작업 환경을 그대로 쓴다.
 - 길이 0 서술자 가설은 디버그 재기동의 "Registering descs" 줄로만 확인한다. 이 하네스는 포트를 고치지 않는다.
 - PD에서 NIXL의 UCX가 A100 노드 사이에서 GPU 메모리를 직접 읽는지는 확인하지 않았다. UCX가 TCP나 호스트 메모리 경유를 고르면 느리다. 지점별 InfiniBand 송수신량과 서버 로그의 NIXL·UCX 줄로 확인한다.
 - `report.py`는 MLflow를 쓸 수 없어도 0으로 끝난다. `bench_stats.py`는 출력의 경고 문구로 전송 실패를 판단한다. `report.py`의 경고 문구가 바뀌면 실패를 놓칠 수 있다. 작업 끝의 보고가 모든 키를 다시 보낸다.

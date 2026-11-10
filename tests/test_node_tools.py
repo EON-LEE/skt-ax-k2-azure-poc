@@ -154,6 +154,11 @@ class FactsTests(unittest.TestCase):
 
 class PreflightChoiceTests(unittest.TestCase):
     PASS, FAIL = {"ok": True}, {"ok": False, "reason": "VRAM registration failed"}
+    JOB, TLS, MEMTYPE = (name for name, _ in node_tools.PREFLIGHT_VARIANTS)
+
+    def node(self, *passing):
+        return {"job_env": {"UCX_NET_DEVICES": "eth0", "UCX_TLS": "tcp"},
+                "runs": {name: self.PASS if name in passing else self.FAIL for name in (self.JOB, self.TLS, self.MEMTYPE)}}
 
     def choose(self, node0, node1, nodes=("10.0.0.1", "10.0.0.2")):
         ray = FakeRay(list(nodes))
@@ -165,33 +170,40 @@ class PreflightChoiceTests(unittest.TestCase):
                 node_tools.main(["preflight", str(out), "10.0.0.1", "nixl_preflight.py"])
             return json.loads(out.read_text()), shown.getvalue().strip(), ray.pinned
 
-    def test_the_first_variant_that_passes_on_both_nodes_is_chosen(self):
-        both = {"default": self.PASS, "UCX_MEMTYPE_CACHE=n": self.PASS}
-        cache_off = {"default": self.FAIL, "UCX_MEMTYPE_CACHE=n": self.PASS}
-        self.assertEqual(self.choose(both, both)[1], "default")
-        result, shown, pinned = self.choose(both, cache_off)
-        self.assertEqual((result["choice"], shown), ("UCX_MEMTYPE_CACHE=n", "UCX_MEMTYPE_CACHE=n"))
-        self.assertEqual(pinned, [{"node:10.0.0.2": 0.001}], "node1's run is a Ray task pinned to node1")
-        none = {"default": self.FAIL, "UCX_MEMTYPE_CACHE=n": self.FAIL}
-        result, shown, _ = self.choose(both, none)
+    def test_the_first_variant_that_passes_on_both_nodes_is_chosen_in_order(self):
+        self.assertEqual((self.JOB, self.TLS, self.MEMTYPE),
+                         ("job", "UCX_TLS=all UCX_NET_DEVICES=all", "UCX_TLS=all UCX_NET_DEVICES=all UCX_MEMTYPE_CACHE=n"))
+        everything = self.node(self.JOB, self.TLS, self.MEMTYPE)
+        self.assertEqual(self.choose(everything, everything)[1], "job", "the job's environment first")
+        result, shown, pinned = self.choose(self.node(self.TLS, self.MEMTYPE), self.node(self.TLS, self.MEMTYPE))
+        self.assertEqual((shown, result["choice_env"]), (self.TLS, {"UCX_TLS": "all", "UCX_NET_DEVICES": "all"}))
+        self.assertEqual(result["job_env"], {"node0": {"UCX_NET_DEVICES": "eth0", "UCX_TLS": "tcp"},
+                                             "node1": {"UCX_NET_DEVICES": "eth0", "UCX_TLS": "tcp"}},
+                         "the job's UCX values of every node are recorded")
+        self.assertEqual(pinned, [{"node:10.0.0.2": 0.001}], "node1's runs are a Ray task pinned to node1")
+        self.assertEqual(self.choose(self.node(self.TLS, self.MEMTYPE), self.node(self.MEMTYPE))[1], self.MEMTYPE,
+                         "a variant must pass on both nodes")
+        result, shown, _ = self.choose(everything, self.node())
         self.assertIsNone(result["choice"])
-        self.assertEqual(shown, "none: node1 default: VRAM registration failed; node1 UCX_MEMTYPE_CACHE=n: VRAM registration failed")
-        result, shown, _ = self.choose(both, both, nodes=("10.0.0.1",))
-        self.assertEqual(shown, "none: node1 not reached: no other node", "PD needs node1")
+        self.assertTrue(shown.startswith(f"none: node1 job: VRAM registration failed; node1 {self.TLS}: "), shown)
+        self.assertEqual(self.choose(everything, everything, nodes=("10.0.0.1",))[1], "none: node1 not reached: no other node")
 
-    def test_one_run_per_variant_with_its_environment_and_a_time_limit(self):
+    def test_each_run_gets_its_variants_values_over_the_jobs(self):
         script = ("import json, os, sys, time\n"
                   "print('[1612345678.1] UCX  WARN  noise first')\n"
                   "if os.environ.get('UCX_MEMTYPE_CACHE') == 'slow': time.sleep(30)\n"
-                  "print(json.dumps({'ok': os.environ.get('UCX_MEMTYPE_CACHE') == 'n', 'cvd': os.environ['CUDA_VISIBLE_DEVICES']}))\n")
-        with tempfile.TemporaryDirectory() as folder:
+                  "print(json.dumps({'ok': os.environ['UCX_TLS'] == 'all', 'tls': os.environ['UCX_TLS'],\n"
+                  "                  'devices': os.environ['UCX_NET_DEVICES'], 'cvd': os.environ['CUDA_VISIBLE_DEVICES']}))\n")
+        variants = (*node_tools.PREFLIGHT_VARIANTS[:2], ("slow", {"UCX_TLS": "all", "UCX_MEMTYPE_CACHE": "slow"}))
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.dict(os.environ, {"UCX_TLS": "tcp", "UCX_NET_DEVICES": "eth0"}):
             path = Path(folder, "preflight.py")
             path.write_text(script)
-            runs = node_tools.run_preflight(str(path), (("default", {}), ("off", {"UCX_MEMTYPE_CACHE": "n"}),
-                                                        ("slow", {"UCX_MEMTYPE_CACHE": "slow"})), timeout=2)
-        self.assertEqual(runs["default"], {"ok": False, "cvd": "0"}, "the last line, GPU 0 visible")
-        self.assertEqual(runs["off"], {"ok": True, "cvd": "0"})
-        self.assertEqual(runs["slow"], {"ok": False, "reason": "no answer within 2 s"})
+            found = node_tools.run_preflight(str(path), variants, timeout=2)
+        self.assertEqual({k: found["job_env"][k] for k in ("UCX_TLS", "UCX_NET_DEVICES")}, {"UCX_TLS": "tcp", "UCX_NET_DEVICES": "eth0"})
+        self.assertEqual(found["runs"][self.JOB], {"ok": False, "tls": "tcp", "devices": "eth0", "cvd": "0"}, "the last line")
+        self.assertEqual(found["runs"][self.TLS], {"ok": True, "tls": "all", "devices": "all", "cvd": "0"})
+        self.assertEqual(found["runs"]["slow"], {"ok": False, "reason": "no answer within 2 s"})
 
 
 class DescsTests(unittest.TestCase):

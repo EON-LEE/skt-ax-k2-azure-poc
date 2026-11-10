@@ -17,6 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "aml" / "src"
 sys.path[:0] = [str(ROOT / "aml"), str(SRC / "bench"), str(SRC)]
+import node_tools  # noqa: E402
 import render_job  # noqa: E402
 import slo_suites  # noqa: E402
 del sys.path[:3]
@@ -228,7 +229,7 @@ class EntryHookTests(unittest.TestCase):
         self.assertIn("rc=1", other.stdout)
         self.assertEqual(len(slo_calls), 1, "rounds never relaunch: only the screening has the length fallback")
 
-    def pd_stubs(self, folder, smoke='{"ok": true, "reason": "ok"}', replica_ip="10.1.2.3", preflight="default",
+    def pd_stubs(self, folder, smoke='{"ok": true, "reason": "ok"}', replica_ip="10.1.2.3", preflight="job",
                  descs="2 'Registering descs' lines, 244 descriptors, 1 of zero length", peer_alive=True):
         """protocol.sh's functions with the second server, the NIXL preflight, the proxy, the smoke test, node1's log
         and the client stubbed. node1's server answers /health while peer_alive; otherwise it has exited."""
@@ -413,18 +414,29 @@ class EntryHookTests(unittest.TestCase):
         return result, read
 
     @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
-    def test_pd_takes_the_environment_its_nixl_preflight_passed_with(self):
-        for choice, expected in (("default", "unset"), ("UCX_MEMTYPE_CACHE=n", "n")):
+    def test_both_pd_servers_get_exactly_the_preflight_variant_that_passed(self):
+        job = "export UCX_TLS=tcp UCX_NET_DEVICES=eth0\n"  # what the job runtime sets (the PD rerun's preflight record)
+        vllm = 'echo "TLS=$UCX_TLS DEV=$UCX_NET_DEVICES MEMTYPE=${UCX_MEMTYPE_CACHE:-unset}" >> FOLDER/vllm-calls\n'
+        for choice, extra in node_tools.PREFLIGHT_VARIANTS:
             with self.subTest(choice=choice), tempfile.TemporaryDirectory() as folder:
-                result, read = self.run_pd(Path(folder), 'echo "UCX_MEMTYPE_CACHE=${UCX_MEMTYPE_CACHE:-unset}" >> FOLDER/vllm-calls\n',
-                                           preflight=choice)
-                call, replica, phases, reports = read("vllm-calls"), read("replica"), read("phases"), read("reports")
+                result, read = self.run_pd(Path(folder), vllm, extra=job, preflight=choice)
+                call, node1, phases, reports = read("vllm-calls").strip(), read("replica").splitlines()[0], read("phases"), read("reports")
                 self.assertIn("rc=0", result.stdout, result.stderr)
-                self.assertEqual(call.strip(), f"UCX_MEMTYPE_CACHE={expected}", "node0's server")
-                self.assertEqual('"UCX_MEMTYPE_CACHE": "n"' in replica.splitlines()[0], expected == "n", "node1's server")
+                values = {"UCX_TLS": "tcp", "UCX_NET_DEVICES": "eth0", "UCX_MEMTYPE_CACHE": "unset", **extra}
+                self.assertEqual(call, "TLS={UCX_TLS} DEV={UCX_NET_DEVICES} MEMTYPE={UCX_MEMTYPE_CACHE}".format(**values),
+                                 "node0's server: the job's values, or exactly the variant's")
+                for name in ("UCX_TLS", "UCX_NET_DEVICES", "UCX_MEMTYPE_CACHE"):
+                    self.assertEqual(f'"{name}": "{extra.get(name)}"' in node1, name in extra, f"node1's server: {name}")
+                self.assertEqual("UCX_" in node1, bool(extra), "the job variant adds nothing; node1 keeps its job values")
                 self.assertIn("node0.scr-PD.preflight --file", reports)
-                self.assertTrue(phases.startswith("scr-PD passed NIXL preflight passed with"), phases)
-        self.assertNotIn("UCX_TLS", PROTOCOL_SH + json.dumps(PROTOCOL["layouts"]["PD"].get("env")), "UCX_TLS would drop InfiniBand")
+                self.assertTrue(phases.startswith(f"scr-PD passed NIXL preflight passed with "
+                                                  f"{'the job' if choice == 'job' else choice}"), phases)
+        names = [name for name, _ in node_tools.PREFLIGHT_VARIANTS]
+        self.assertEqual(names, ["job", "UCX_TLS=all UCX_NET_DEVICES=all", "UCX_TLS=all UCX_NET_DEVICES=all UCX_MEMTYPE_CACHE=n"])
+        self.assertTrue(all(extra.get("UCX_TLS", "all") == "all" for _, extra in node_tools.PREFLIGHT_VARIANTS),
+                        "never a restricted UCX_TLS list")
+        self.assertFalse([k for k in PROTOCOL["layouts"]["PD"]["env"] if k.startswith("UCX_")],
+                         "no fixed UCX value: the servers get the preflight's")
 
     @unittest.skipUnless(POSIX_BASH, "needs a POSIX bash")
     def test_pd_does_not_start_when_no_preflight_variant_passes(self):
@@ -454,8 +466,8 @@ class EntryHookTests(unittest.TestCase):
         self.assertEqual(['"VLLM_LOGGING_LEVEL": "DEBUG"' in line for line in starts], [False, True], "and of node1's")
         self.assertTrue(kept, "the first log is kept")
         self.assertEqual(phases.strip(), "scr-PD failed experimental phase: UCX typed the KV cache's VRAM as host memory "
-                         "although the NIXL preflight passed (default); the debug relaunch failed again; 2 'Registering "
-                         "descs' lines, 244 descriptors, 1 of zero length (no suites) [NIXL preflight passed with the defaults]")
+                         "although the NIXL preflight passed (job); the debug relaunch failed again; 2 'Registering "
+                         "descs' lines, 244 descriptors, 1 of zero length (no suites) [NIXL preflight passed with the job's UCX environment]")
         failure = reports[reports.index("node0.scr-PD.failure --text "):]
         self.assertTrue(failure.startswith('node0.scr-PD.failure --text {"node0": [{"kind": "registering"'), failure[:200])
         self.assertEqual(client, "", "no suites")

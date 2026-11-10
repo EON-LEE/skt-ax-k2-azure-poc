@@ -9,9 +9,9 @@
       The KV cache size and DP rank lines of the latest start in <log name> on the other nodes: their engines
       (a second server, an mp-multinode layout's headless DP engines) never reach node0's log.
   python3 node_tools.py preflight <out.json> <head ip> <nixl_preflight.py> [--timeout 120]
-      NIXL's VRAM registration (nixl_preflight.py) on node0 and every other node, with the defaults and with
-      UCX_MEMTYPE_CACHE=n, each run limited to --timeout seconds. Prints the PD servers' environment: the first
-      variant that passes on every node ("default" or "UCX_MEMTYPE_CACHE=n"), else "none: <reason>".
+      NIXL's VRAM registration (nixl_preflight.py) on node0 and every other node with each PREFLIGHT_VARIANTS entry
+      in order, each run limited to --timeout seconds. Prints the PD servers' environment: the first variant that
+      passes on every node ("job", or the UCX assignments to add), else "none: <reason>".
   python3 node_tools.py descs <out.json> <outputs> <head ip> <phase>
       vLLM NixlConnector's debug lines "Registering descs: [(base, length, device, ''), ...]" and UCX's host-typing
       errors from both PD servers' logs of the latest start, with the zero-length descriptors counted.
@@ -41,7 +41,13 @@ GPU_DEVICE = re.compile(r"/dev/nvidia(\d+|-uvm)")
 START_MARK = "=== axk2 replica start"  # written by bench_replica before every launch of node1's process
 KV_TOKENS = re.compile(r"GPU KV cache size: ([\d,]+) tokens")
 FACT_LINES = re.compile(r"GPU KV cache size|Maximum concurrency for|is assigned as DP rank|Auto-fit max_model_len")
-PREFLIGHT_VARIANTS = (("default", {}), ("UCX_MEMTYPE_CACHE=n", {"UCX_MEMTYPE_CACHE": "n"}))
+# The job's own UCX environment first, then vLLM's recommendation (nixl_connector_usage.md), then that without UCX's
+# memory-type cache. The job runtime sets UCX_TLS=tcp, which leaves out cuda_copy: UCX then types VRAM as host
+# memory. A variant's name is what protocol.sh adds to both PD servers; UCX_TLS is never a restricted list.
+PREFLIGHT_VARIANTS = (("job", {}),
+                      ("UCX_TLS=all UCX_NET_DEVICES=all", {"UCX_TLS": "all", "UCX_NET_DEVICES": "all"}),
+                      ("UCX_TLS=all UCX_NET_DEVICES=all UCX_MEMTYPE_CACHE=n",
+                       {"UCX_TLS": "all", "UCX_NET_DEVICES": "all", "UCX_MEMTYPE_CACHE": "n"}))
 DESC = re.compile(r"\((\d+), (\d+), (\d+), '[^']*'\)")
 MP_CHILD = ("multiprocessing.spawn", "--multiprocessing-fork")
 
@@ -114,18 +120,19 @@ def facts(out, outputs, head, name):
 
 
 def run_preflight(script, variants, timeout=120):
-    """{variant: nixl_preflight.py's JSON summary} on this node, each run limited to `timeout` seconds."""
-    out = {}
+    """This node's UCX_* job environment and, per variant, nixl_preflight.py's JSON summary (each run limited to
+    `timeout` seconds)."""
+    out = {"job_env": {k: v for k, v in sorted(os.environ.items()) if k.startswith("UCX_")}, "runs": {}}
     for name, extra in variants:
         env = {**os.environ, **extra, "CUDA_VISIBLE_DEVICES": "0"}  # Ray hides every GPU from a GPU-less task
         try:
             run = subprocess.run([sys.executable, script], capture_output=True, text=True, env=env, timeout=timeout)
             lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
-            out[name] = json.loads(lines[-1]) if lines else {"ok": False, "reason": f"no summary (exit {run.returncode})"}
+            out["runs"][name] = json.loads(lines[-1]) if lines else {"ok": False, "reason": f"no summary (exit {run.returncode})"}
         except subprocess.TimeoutExpired:
-            out[name] = {"ok": False, "reason": f"no answer within {timeout} s"}
+            out["runs"][name] = {"ok": False, "reason": f"no answer within {timeout} s"}
         except (OSError, ValueError) as exc:
-            out[name] = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+            out["runs"][name] = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
     return out
 
 
@@ -139,13 +146,14 @@ def preflight(out, head, script, timeout=120):
     except Exception as exc:
         result["ray_error"] = f"{type(exc).__name__}: {exc}"[:300]
     nodes = sorted(key for key in result if key.startswith("node"))
-    passing = [name for name, _ in PREFLIGHT_VARIANTS
-               if len(nodes) > 1 and all(result[node].get(name, {}).get("ok") for node in nodes)]
+    ok = lambda node, name: result[node]["runs"].get(name, {}).get("ok")
+    passing = [name for name, _ in PREFLIGHT_VARIANTS if len(nodes) > 1 and all(ok(node, name) for node in nodes)]
+    result["job_env"] = {node: result[node]["job_env"] for node in nodes}
     result["choice"] = passing[0] if passing else None
+    result["choice_env"] = dict(PREFLIGHT_VARIANTS)[passing[0]] if passing else None
     if not passing:
-        result["reason"] = ("; ".join(f"{node} {name}: {result[node].get(name, {}).get('reason') or 'failed'}"
-                                      for node in nodes for name, _ in PREFLIGHT_VARIANTS
-                                      if not result[node].get(name, {}).get("ok"))
+        result["reason"] = ("; ".join(f"{node} {name}: {result[node]['runs'].get(name, {}).get('reason') or 'failed'}"
+                                      for node in nodes for name, _ in PREFLIGHT_VARIANTS if not ok(node, name))
                             if len(nodes) > 1 else f"node1 not reached: {result.get('ray_error', 'no other node')}")[:400]
     with open(out, "w") as handle:
         json.dump(result, handle)
