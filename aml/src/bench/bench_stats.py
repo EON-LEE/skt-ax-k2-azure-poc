@@ -406,15 +406,29 @@ def long_check(comparison, rule):
             "prefix_logprob_diff": comparison.get("greedy_prefix_logprob_diff")}
 
 
+EARLY_DIVERGENCE_MAX = 2  # slo_protocol.json parity.acceptance.early_divergence
+
+
 def parity_acceptance(candidate, floor):
     """Acceptance of a candidate against its job's control-vs-reference floor of the same round (A2 vs A, D2 vs D;
-    slo_protocol.json parity.acceptance)."""
+    slo_protocol.json parity.acceptance). When the control itself diverged early on more than EARLY_DIVERGENCE_MAX
+    greedy prompts (round 1: A2 9 and D2 8 of 32), that absolute check cannot tell a misconfigured layout from
+    run-to-run nondeterminism: it is reported as uninformative with both counts, the status rests on the two
+    floor-relative checks, and the pre-registered status stays in the record (a deviation)."""
     if not floor or floor.get("mean_abs_logprob_diff") is None or candidate.get("mean_abs_logprob_diff") is None:
         return {"status": "unknown", "reason": "no control or candidate parity in this round"}
     checks = {"mean_abs_logprob_diff": candidate["mean_abs_logprob_diff"] <= 2 * floor["mean_abs_logprob_diff"] + 0.005,
               "top1_agreement": candidate["top1_agreement"] >= floor["top1_agreement"] - 0.01,
-              "early_divergence": candidate["greedy_diverged_before_16"] <= 2}
-    return {"status": "pass" if all(checks.values()) else "fail", "checks": checks}
+              "early_divergence": candidate["greedy_diverged_before_16"] <= EARLY_DIVERGENCE_MAX}
+    status = "pass" if all(checks.values()) else "fail"
+    control = floor.get("greedy_diverged_before_16")
+    if control is None or control <= EARLY_DIVERGENCE_MAX:
+        return {"status": status, "checks": checks}
+    informative = [value for name, value in checks.items() if name != "early_divergence"]
+    return {"status": "pass" if all(informative) else "fail", "checks": checks, "pre_registered_status": status,
+            "early_divergence": {"status": "uninformative", "candidate": candidate["greedy_diverged_before_16"],
+                                 "control": control, "limit": EARLY_DIVERGENCE_MAX,
+                                 "prompts": candidate.get("greedy_prompts")}}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1536,8 +1550,15 @@ def markdown(evidence):
         lines += ["", "## D x 2 scaling", ""] + [f"- {k}: ratio {fmt(v['ratio'])}, passed {v['passed']}"
                                                  for k, v in evidence["dx2_scaling"].items()]
     if evidence["parity_acceptance"]:
+        def accepted(v):
+            note = v.get("early_divergence")
+            if not note:
+                return v["status"]
+            return (f"{v['status']} (pre-registered: {v['pre_registered_status']}; early divergence uninformative: "
+                    f"{note['candidate']} of {note.get('prompts') or '?'} prompts against the control's {note['control']}, "
+                    f"limit {note['limit']})")
         lines += ["", "## Parity (acceptance against the control-vs-reference floor: A2/A, D2/D)", ""] + [
-            f"- {k}: {v['status']}" for k, v in evidence["parity_acceptance"].items()]
+            f"- {k}: {accepted(v)}" for k, v in evidence["parity_acceptance"].items()]
     if evidence.get("long_context"):
         lines += ["", "## Long-context greedy check (P3, 32K documents, against the job's reference)", ""] + [
             f"- {k}: {v['status']}; first difference {v.get('first_difference')}, token agreement {v.get('token_agreement')}"
