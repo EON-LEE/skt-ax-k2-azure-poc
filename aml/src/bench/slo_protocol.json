@@ -14,7 +14,10 @@
    "effect": "their comparisons are labelled 'added after screening' in every analyze and report output (rounds.selection)"},
   {"date": "2026-11-12", "what": "Round 1 ran without W1real: every realtext point failed because vllm bench serve needs pandas for a custom dataset and the vLLM image has none (workloads.W1real.not_run_rounds)",
    "why": "a harness defect found while round 1 ran (W1real had never run on a GPU); it says nothing about the layouts",
-   "effect": "the round validity of round 1 does not require realtext; its other suites count as usual. Rounds 2 and 3 run at the re-frozen commit, whose only measuring change is the pandas install before the realtext suite, so the W1real comparisons rest on rounds 2 and 3 (n = 2: wide intervals, mostly inconclusive). Decided before any round-1 result was analyzed"}
+   "effect": "the round validity of round 1 does not require realtext; its other suites count as usual. Rounds 2 and 3 run at the re-frozen commit, whose only measuring change is the pandas install before the realtext suite, so the W1real comparisons rest on rounds 2 and 3 (n = 2: wide intervals, mostly inconclusive). Decided before any round-1 result was analyzed"},
+  {"date": "2026-11-12", "what": "The early-divergence parity check (at most 2 of 32 greedy prompts differing before token 16) is reported as uninformative when the control itself fails it (parity.acceptance.uninformative)",
+   "why": "in round 1 the relaunch controls, identical in configuration to their references, diverged early on 9 (A2 vs A) and 8 (D2 vs D) of 32 prompts: run-to-run nondeterminism of batched FP8/NVFP4 MoE inference flips near-tied tokens, so the absolute limit was miscalibrated",
+   "effect": "the parity status rests on the two floor-relative checks (mean |delta logprob|, top-1 agreement); the analysis keeps the pre-registered status and both counts. Decided after the round-1 parity and before the parity of rounds 2 and 3"}
  ],
  "checkpoints": {
   "fp8": {"repo": "skt/A.X-K2", "revision": "4237c6a60cec6ae449854870d01a42665a1166aa", "size_gb": 694.4},
@@ -365,7 +368,8 @@
   "reference": "slo-<reference> of the same round job: slo-A in the FP8 job, slo-D in the NVFP4 job",
   "acceptance": {"applies": "every candidate and sensitivity run of a round job against its reference, with the job's control as the floor (FP8: A2 vs A; NVFP4: D2 vs D)",
                  "mean_abs_logprob_diff": "<= 2 x (control vs reference) + 0.005 nats", "top1_agreement": ">= (control vs reference) - 0.01",
-                 "early_divergence": "a first difference before token 16 on more than 2 of the 32 greedy prompts means the layout is misconfigured"},
+                 "early_divergence": "a first difference before token 16 on more than 2 of the 32 greedy prompts means the layout is misconfigured",
+                 "uninformative": "when the control itself exceeds the early-divergence limit (round 1: A2 9 and D2 8 of 32), that check cannot separate a misconfigured layout from run-to-run nondeterminism: it is reported as uninformative with the candidate's and the control's counts, the status rests on the two floor-relative checks, and the pre-registered status stays in the record (deviations, 2026-11-12)"},
   "nvfp4": "NVFP4 and FP8 run in different jobs, so no token-level parity of D against A is computed; quality is the accuracy section's paired comparison (KoBALT 700 + CLIcK 300, McNemar, non-inferiority margin -3 points)"
  },
  "accuracy": {

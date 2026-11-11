@@ -258,6 +258,20 @@ class ParityAndTelemetryTests(unittest.TestCase):
         self.assertEqual(bs.parity_acceptance(dict(result, mean_abs_logprob_diff=0.02), floor)["status"], "fail")
         self.assertEqual(bs.parity_acceptance(result, None)["status"], "unknown")
 
+    def test_early_divergence_is_uninformative_when_the_control_fails_it(self):
+        candidate = {"mean_abs_logprob_diff": 0.0359, "top1_agreement": 0.9862, "greedy_diverged_before_16": 9,
+                     "greedy_prompts": 32}
+        quiet = {"mean_abs_logprob_diff": 0.034, "top1_agreement": 0.9874, "greedy_diverged_before_16": 2}
+        self.assertEqual(bs.parity_acceptance(candidate, quiet), {"status": "fail", "checks": {
+            "mean_abs_logprob_diff": True, "top1_agreement": True, "early_divergence": False}})
+        noisy = dict(quiet, greedy_diverged_before_16=9)
+        result = bs.parity_acceptance(candidate, noisy)
+        self.assertEqual((result["status"], result["pre_registered_status"]), ("pass", "fail"))
+        self.assertEqual(result["early_divergence"], {"status": "uninformative", "candidate": 9, "control": 9, "limit": 2,
+                                                      "prompts": 32})
+        self.assertEqual(bs.parity_acceptance(dict(candidate, top1_agreement=0.95), noisy)["status"], "fail",
+                         "the floor-relative checks still decide")
+
     def test_long_greedy_check_and_suspect_rule(self):
         rule = PROTOCOL["parity"]["p3"]
         tokens = list(range(64))
