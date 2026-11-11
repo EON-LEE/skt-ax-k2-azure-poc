@@ -352,6 +352,46 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(len({line["source"] for line in lines}), 5, "no window twice")
         self.assertEqual(result["dataset_source"], "parity_corpus.json windows")
 
+    def realtext_client_calls(self, present, works):
+        """works: the installers that succeed ("uv", "pip"); uv is missing from the image unless it works."""
+        state, calls = {"pandas": present}, []
+
+        def run(command, **kwargs):
+            self.assertNotIn("PYTHONPATH", kwargs["env"])
+            kind = "probe" if command[:2] == ["python3", "-c"] else "uv" if command[0] == "uv" else "pip"
+            calls.append(kind)
+            if kind == "probe":
+                return subprocess.CompletedProcess(command, 0 if state["pandas"] else 1,
+                                                   "2.3.1\n" if state["pandas"] else "", "")
+            self.assertIn(ss.REALTEXT_CLIENT_PACKAGE, command)
+            if kind == "uv" and "uv" not in works:
+                raise FileNotFoundError("uv")
+            state["pandas"] = kind in works
+            return subprocess.CompletedProcess(command, 0 if kind in works else 1, "", "no matching distribution")
+
+        with mock.patch.object(ss.subprocess, "run", run):
+            return ss.realtext_client(), calls
+
+    def test_realtext_client_installs_pandas_only_when_missing(self):
+        record, calls = self.realtext_client_calls(True, set())
+        self.assertEqual((record, calls), ({"pandas": "2.3.1", "installed": False}, ["probe"]))
+        record, calls = self.realtext_client_calls(False, {"uv"})
+        self.assertEqual((record["pandas"], record["installed"], calls), ("2.3.1", True, ["probe", "uv", "probe"]))
+        record, calls = self.realtext_client_calls(False, {"pip"})
+        self.assertEqual((record["pandas"], calls), ("2.3.1", ["probe", "uv", "pip", "probe"]))
+        self.assertIn("error", record["install"][0], "a missing uv falls back to pip")
+        record, calls = self.realtext_client_calls(False, set())
+        self.assertEqual((record["pandas"], record["installed"], len(record["install"])), (None, False, 2))
+
+    def test_suite_realtext_reports_the_client(self):
+        client = {"pandas": "2.3.1", "installed": True}
+        with mock.patch.object(ss, "realtext_client", return_value=client), \
+                mock.patch.object(ss, "realtext_windows", return_value=[]), \
+                mock.patch.object(ss, "run_points", return_value={"method": "m", "plan": [], "points": []}) as points:
+            result = ss.suite_realtext(args())
+        self.assertEqual(result["client"], client)
+        self.assertEqual([p["name"] for p in points.call_args.args[2]], ["W1real-p0-r0.6", "W1real-p1-r1"])
+
 
 class LegacySeedTests(unittest.TestCase):
     def test_sweep_and_latency_use_a_seed_per_point(self):

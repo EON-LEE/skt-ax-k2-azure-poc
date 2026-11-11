@@ -384,6 +384,19 @@ class AnalyzeTests(unittest.TestCase):
         self.assertTrue(extension["recommended"])
         self.assertTrue(any("ln(A2/A)" in reason for reason in extension["reasons"]))
 
+    def test_realtext_is_waived_only_in_its_not_run_rounds(self):
+        packages = [self.package(r, self.round_points(r, c2_tpot=41.0)) for r in (1, 2)]
+        for pkg in packages:
+            for suites in pkg["plans"].values():
+                if "realtext" in suites:
+                    suites["realtext"] = {"plan": ["W1real-p0-r0.6", "W1real-p1-r1"]}
+        self.assertIn("1", PROTOCOL["workloads"]["W1real"]["not_run_rounds"])
+        evidence = bs.analyze(packages, PROTOCOL, resamples=0)
+        self.assertEqual(evidence["valid_rounds"], [1])
+        self.assertTrue(evidence["round_validity"][1]["jobs"]["fp8"]["waived"])
+        self.assertIn("slo-A: W1real-p0-r0.6 has no valid attempt", evidence["round_validity"][2]["problems"])
+        self.assertIn("- Round 1 waived: slo-A: realtext not required in round 1", bs.markdown(evidence))
+
     def test_kv_bound_points_are_excluded_and_dx2_scaling(self):
         packages = [self.package(r, self.round_points(r, 41.0)) for r in (1, 2, 3)]
         for pkg in packages:

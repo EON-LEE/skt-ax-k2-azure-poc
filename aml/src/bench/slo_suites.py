@@ -16,7 +16,7 @@ paritylong   P3: greedy continuations of the two 32,768-token documents, no prom
 warmup       Discarded 32-request bursts per input length (seeds 9xxxxxx), then a prefix-cache reset.
 partr        Part R: the published 1K/8K/32K x concurrency 1/32 matrix with round seeds.
 slo          Closed-loop W1 (S1) and open-loop Poisson W1/W2 rate grids with --goodput.
-realtext     W1 lengths with real-text windows (FP8 layouts).
+realtext     W1 lengths with real-text windows (every round layout); installs pandas for the client first.
 soak         W1 at 0.8 x lambda* for 45 minutes (soak round only).
 accuracy     The pre-registered KoBALT/CLIcK subset, greedy, against slo-A and slo-D of round 1 (accuracy.py).
 screen       Screening (ROUND 0): start facts, short parity, warm-up, Part R and one Poisson W1 point (or a W1
@@ -745,9 +745,48 @@ def realtext_dataset(args, source, count, seed, output_len, path):
     return {"dataset": str(path), "dataset_source": kind}
 
 
+# `vllm bench serve` reads a custom dataset with pandas, an optional vLLM extra (vllm[bench]) that the
+# vllm/vllm-openai:v0.23.0 image does not ship; every W1real point of round 1 ended in that ImportError.
+REALTEXT_CLIENT_PACKAGE = "pandas>=2.2,<3"
+PANDAS_PROBE = "import importlib.util, pandas; assert importlib.util.find_spec('vllm'); print(pandas.__version__)"
+
+
+def realtext_client(timeout=600):
+    """Makes pandas importable for the realtext client: probes python3 of the client's environment (bench() drops
+    PYTHONPATH; the probe also asks for vLLM) and, when pandas is missing, installs it into the system environment
+    as entry.sh installs Ray and pytest (uv, then pip). Returns the record the realtext suite reports."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+    def probe():
+        try:
+            run = subprocess.run(["python3", "-c", PANDAS_PROBE], capture_output=True, text=True, timeout=120, env=env)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return (run.stdout.strip() or None) if run.returncode == 0 else None
+
+    version = probe()
+    if version:
+        return {"pandas": version, "installed": False}
+    log = []
+    for command in (["uv", "pip", "install", "--system", "-q", REALTEXT_CLIENT_PACKAGE],
+                    ["python3", "-m", "pip", "install", "-q", "--no-cache-dir", REALTEXT_CLIENT_PACKAGE]):
+        try:
+            run = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=env)
+            log.append({"command": shlex.join(command), "returncode": run.returncode,
+                        "tail": (run.stderr or run.stdout)[-500:]})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.append({"command": shlex.join(command), "error": str(exc)[-500:]})
+            continue
+        version = probe()
+        if version:
+            return {"pandas": version, "installed": True, "install": log}
+    return {"pandas": None, "installed": False, "install": log}
+
+
 def suite_realtext(args):
     protocol = protocol_context(args)
     workload = protocol["workloads"]["W1real"]
+    client = realtext_client()
     if args.realtext_path:
         source = args.realtext_path
     else:
@@ -760,7 +799,7 @@ def suite_realtext(args):
         point["prepare"] = (lambda p=point, file=path: realtext_dataset(args, source, p["prompts"], p["seed"],
                                                                          p["output_len"], file))
         points.append(point)
-    return run_points(args, "realtext", points, protocol, workload["description"])
+    return {**run_points(args, "realtext", points, protocol, workload["description"]), "client": client}
 
 
 def teacher_forced(base, name, ids):

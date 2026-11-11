@@ -861,20 +861,30 @@ def full_grid(protocol, phase):
     return not any(name.endswith("_points") for name in options)
 
 
+def realtext_not_run(protocol, round_):
+    """The recorded reason W1real could not run in this round (workloads.W1real.not_run_rounds), else None."""
+    return (protocol["workloads"]["W1real"].get("not_run_rounds") or {}).get(str(round_))
+
+
 def round_validity(round_, package_list, chosen, protocol, phases):
     """A round job counts only if every measuring suite of its comparison phases reported, none aborted, and every
-    planned point has a valid attempt (in the soak round the soak included)."""
+    planned point has a valid attempt (in the soak round the soak included). A round recorded in
+    workloads.W1real.not_run_rounds does not need realtext (a harness defect, slo_protocol.json deviations)."""
     plans = {}
     for pkg in package_list:
         if package_round(pkg) == round_:
             plans.update(pkg.get("plans", {}))
-    problems = []
+    problems, waived = [], []
     lost = {launch for pkg in package_list if package_round(pkg) == round_ for launch in pkg.get("missing_launches") or []}
+    not_run = realtext_not_run(protocol, round_)
     for phase in phases:
         if phase in lost:
             problems.append(f"{phase}: a part of the results package never arrived")
         suites = plans.get(phase, {})
         required = [s for s in phase_suites(protocol, phase, round_) if s in ("partr", "slo", "realtext", "soak")]
+        if not_run and "realtext" in required:
+            required.remove("realtext")
+            waived.append(f"{phase}: realtext not required in round {round_} ({not_run})")
         for suite in required:
             plan = suites.get(suite)
             if plan is None:
@@ -889,7 +899,7 @@ def round_validity(round_, package_list, chosen, protocol, phases):
                         if r == round_ and ph == phase and p["name"] in (name, f"{name}-retry")]
                 if not hits or not hits[0]["valid"]:
                     problems.append(f"{phase}: {name} has no valid attempt")
-    return {"valid": not problems, "problems": problems}
+    return {"valid": not problems, "problems": problems, **({"waived": waived} if waived else {})}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1486,6 +1496,9 @@ def markdown(evidence):
     for round_, result in evidence["round_validity"].items():
         if not result["valid"]:
             lines.append(f"- Round {round_} is invalid: " + "; ".join(result["problems"][:10]))
+        waived = [w for job in (result.get("jobs") or {}).values() for w in job.get("waived", [])]
+        if waived:
+            lines.append(f"- Round {round_} waived: " + "; ".join(waived[:10]))
     for name, rows in evidence["comparisons"].items():
         meta = (evidence.get("comparison_info") or {}).get(name, {})
         tags = [tag for tag in ("cross-job" if meta.get("kind") == "cross-job" else None,

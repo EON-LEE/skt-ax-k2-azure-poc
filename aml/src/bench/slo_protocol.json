@@ -1,7 +1,7 @@
 {
  "schema": "axk2-slo-protocol/1",
  "title": "A.X K2 serving re-measurement protocol on 2 x ND96amsr A100 v4 (vLLM v0.23.0)",
- "status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
+ "status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. Round 1 ran at the frozen commit c4b22ca (the D x 2 job first, then the two round-1 jobs on 2026-11-11); its W1real points failed for a missing pandas (deviations), and rounds 2 and 3 run at the re-frozen commit that installs it. Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
  "doc": "docs/BENCHMARK_PROTOCOL.md",
  "assumptions": [
   "The SLO tiers are assumptions until the customer agrees them (or supplies its own) before round 1.",
@@ -11,7 +11,10 @@
  "deviations": [
   {"date": "2026-11-10", "what": "C8m and D24 run in the rounds although the pre-registered selection rule (screen.selection) chose only B0 and D42",
    "why": "the user's decision after the screening report: A + B0 + D42 + C8 + D24, all throughput candidates (C8 = the mp-multinode C8m; the Ray C8 cannot start)",
-   "effect": "their comparisons are labelled 'added after screening' in every analyze and report output (rounds.selection)"}
+   "effect": "their comparisons are labelled 'added after screening' in every analyze and report output (rounds.selection)"},
+  {"date": "2026-11-12", "what": "Round 1 ran without W1real: every realtext point failed because vllm bench serve needs pandas for a custom dataset and the vLLM image has none (workloads.W1real.not_run_rounds)",
+   "why": "a harness defect found while round 1 ran (W1real had never run on a GPU); it says nothing about the layouts",
+   "effect": "the round validity of round 1 does not require realtext; its other suites count as usual. Rounds 2 and 3 run at the re-frozen commit, whose only measuring change is the pandas install before the realtext suite, so the W1real comparisons rest on rounds 2 and 3 (n = 2: wide intervals, mostly inconclusive). Decided before any round-1 result was analyzed"}
  ],
  "checkpoints": {
   "fp8": {"repo": "skt/A.X-K2", "revision": "4237c6a60cec6ae449854870d01a42665a1166aa", "size_gb": 694.4},
@@ -284,6 +287,7 @@
              "dataset": "realtext", "input_len": 1024, "output_len": 512, "arrival_seconds": 360, "min_prompts": 60,
              "window": [60, 360], "drain_timeout": 1800, "rates": [0.6, 1.0], "stride_tokens": 16, "slo_from": "W1",
              "checkpoints": ["fp8"], "layouts": ["D", "D42", "D24"],
+             "not_run_rounds": {"1": "vllm bench serve --dataset-name custom imports pandas (vllm[bench]), which the vllm/vllm-openai:v0.23.0 image lacks; every W1real point of round 1 (commit c4b22ca) ended in ImportError within 15 s, and slo_suites.py installs pandas before the suite from round 2 on"},
              "note": "every round layout runs it with its full suites: the FP8 phases by checkpoint (A, B0, C8m) and the NVFP4 round layouts by name (D, D42, D24; the user's decision of 2026-11-11); real-text expert routing can differ from random tokens in the EP layouts C8m and D24"},
   "soak": {"id": 6, "kind": "open", "description": "W1 at 0.8 x lambda* of the standard SLO for 45 minutes (soak round only)",
            "input_len": 1024, "output_len": 512, "arrival_seconds": 2700, "min_prompts": 60, "window": [60, 2700],
