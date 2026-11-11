@@ -3,20 +3,22 @@
 Benchmark-only: entry.sh reaches this module through bench/protocol.sh for the slo-*, diag-*, cap-*, dx1-*,
 dx2-* and scr-* phases; the demo and the older phases never import it.
 
-  python3 slo_suites.py plan --round N [--layouts C4,D24] [--record F] <PHASE_PLAN tokens>
-                                                            expand `slo-round` into the round's phases
+  python3 slo_suites.py plan --round N [--layouts B0,C8m] [--record F] <PHASE_PLAN tokens>
+                                                            expand a round job's token (slo-round-fp8,
+                                                            slo-round-nvfp4) into the round's phases
   python3 slo_suites.py phase-spec <phase> --round N [--json] server flags, environment and suites (bash)
   python3 slo_suites.py run --tag T --suites a,b --round N ...  run client suites against a server
 
 Suites:
 parity       P1 teacher-forced prompt log-probabilities of 16 fixed 2,048-token documents and P2 greedy
              continuations of 32 fixed prompts (parity_corpus.json); raw per-token data for bench_stats.py.
-paritylong   P1 for the two 32,768-token documents (run last in a phase).
+paritylong   P3: greedy continuations of the two 32,768-token documents, no prompt logprobs (last in a phase).
 warmup       Discarded 32-request bursts per input length (seeds 9xxxxxx), then a prefix-cache reset.
 partr        Part R: the published 1K/8K/32K x concurrency 1/32 matrix with round seeds.
 slo          Closed-loop W1 (S1) and open-loop Poisson W1/W2 rate grids with --goodput.
 realtext     W1 lengths with real-text windows (FP8 layouts).
 soak         W1 at 0.8 x lambda* for 45 minutes (soak round only).
+accuracy     The pre-registered KoBALT/CLIcK subset, greedy, against slo-A and slo-D of round 1 (accuracy.py).
 screen       Screening (ROUND 0): start facts, short parity, warm-up, Part R and one Poisson W1 point (or a W1
              ladder); every step fails softly.
 Other names (functional, ...) run from verify_suites.py.
@@ -176,44 +178,78 @@ def shell_spec(spec):
     return "\n".join(lines)
 
 
-def round_layouts(protocol, text=None):
-    """The candidates compared with A: ROUND_LAYOUTS ("C4,D24", printed by `bench_stats.py select`) or the
-    protocol's list. Each must be a layout of the table that is neither A, a sensitivity nor experimental."""
-    names = [n.strip() for n in (text or "").split(",") if n.strip()] or list(protocol["rounds"]["layouts"])
+def round_jobs(protocol):
+    """{PHASE_PLAN token: round job} (rounds.jobs: slo-round-fp8 -> fp8, slo-round-nvfp4 -> nvfp4)."""
+    return {spec["token"]: name for name, spec in protocol["rounds"]["jobs"].items()}
+
+
+def round_layouts(protocol, job, text=None):
+    """The candidates a round job compares with its reference: ROUND_LAYOUTS ("B0,C8m") or the job's frozen list.
+    Each must be a layout of the job's checkpoint that fits its nodes and is neither A, the job's reference (or a
+    relaunch of it), a sensitivity nor an experimental layout."""
+    spec = protocol["rounds"]["jobs"][job]
+    names = [n.strip() for n in (text or "").split(",") if n.strip()] or list(spec["layouts"])
     for name in names:
         layout = resolve_layout(protocol, name) if name in protocol["layouts"] else None
-        if layout is None or layout["root"] == "A" or layout.get("sensitivity") or layout.get("experimental"):
-            raise ValueError(f"{name} cannot be a round candidate (unknown, A, sensitivity or experimental layout)")
+        if layout is None or layout["root"] in ("A", spec["reference"]) or layout.get("sensitivity") \
+                or layout.get("experimental") or layout["checkpoint"] != spec["checkpoint"] or layout["nodes"] > spec["nodes"]:
+            raise ValueError(f"{name} cannot be a candidate of the {job} round job (unknown, A, its reference, sensitivity, "
+                             f"experimental, another checkpoint or more than {spec['nodes']} node(s))")
     if len(set(names)) != len(names):
         raise ValueError(f"ROUND_LAYOUTS repeats a layout: {','.join(names)}")
     return names
 
 
-def round_plan(protocol, round_, layouts=None):
-    """A -> the candidates in the round's order -> sensitivity runs (round 1) -> A2 -> capacity phases (round 1)."""
+def round_plan(protocol, round_, job, layouts=None):
+    """reference -> the candidates in the round's order -> sensitivity runs (round 1) -> control -> capacity phases
+    (round 1) of one round job."""
     rounds, round_ = protocol["rounds"], int(round_)
     if not 1 <= round_ <= rounds["maximum"]:
         raise ValueError(f"round {round_} is outside the pre-registered rounds 1..{rounds['maximum']}")
-    names = round_layouts(protocol, layouts) if layouts is None or isinstance(layouts, str) else list(layouts)
-    plan = ["slo-A", *(f"slo-{name}" for name in ordered(names, round_))]
+    spec = rounds["jobs"][job]
+    names = round_layouts(protocol, job, layouts) if layouts is None or isinstance(layouts, str) else list(layouts)
+    plan = [f"slo-{spec['reference']}", *(f"slo-{name}" for name in ordered(names, round_))]
     if round_ in rounds["sensitivity_rounds"]:
         plan += [f"slo-{sensitivity_of(protocol, name)}" for name in names if sensitivity_of(protocol, name)]
-    plan.append("slo-A2")
+    if spec.get("control"):
+        plan.append(f"slo-{spec['control']}")
     if round_ in rounds["capacity_rounds"]:
-        plan += ["cap-A", *(f"cap-{name}" for name in names)]
+        plan += [f"cap-{spec['reference']}", *(f"cap-{name}" for name in names)]
     return plan
 
 
 def expand_plan(protocol, tokens, round_, layouts=None):
-    """PHASE_PLAN with every `slo-round` token replaced by the round's phases; unknown tokens are refused."""
+    """PHASE_PLAN with a round job's token replaced by the round's phases. Unknown tokens are refused, and so is a
+    second round token: ROUND_LAYOUTS belongs to one job."""
+    jobs = round_jobs(protocol)
+    if sum(token in jobs for token in tokens) > 1:
+        raise ValueError(f"a plan holds one round job token at most ({', '.join(jobs)})")
     expanded = []
     for token in tokens:
-        if token == "slo-round":
-            expanded += round_plan(protocol, round_, layouts)
+        if token in jobs:
+            expanded += round_plan(protocol, round_, jobs[token], layouts)
         else:
             phase_entry(protocol, token)
             expanded.append(token)
     return expanded
+
+
+def plan_record(protocol, round_, tokens, text=None):
+    """(phases, protocol-plan.json record): the job, its reference, control and candidates, and whether ROUND_LAYOUTS
+    deviated from the frozen list."""
+    jobs = round_jobs(protocol)
+    job = next((jobs[token] for token in tokens if token in jobs), None)
+    spec = protocol["rounds"]["jobs"].get(job, {})
+    layouts = round_layouts(protocol, job, text) if job else []
+    expanded = expand_plan(protocol, tokens, round_, layouts if job else None)
+    return expanded, {"round": round_, "tokens": list(tokens), "plan": expanded, "job": job,
+                      "reference": spec.get("reference"), "control": spec.get("control"), "layouts": layouts,
+                      "frozen_layouts": list(spec.get("layouts", [])), "deviation": bool(job) and layouts != spec["layouts"]}
+
+
+def phase_rates(protocol, key, override=None):
+    """{workload: rates} of a rates key: the frozen rate_grids.grids[key], with SLO_RATES overrides on top."""
+    return {**protocol.get("rate_grids", {}).get("grids", {}).get(key or "", {}), **(override or {})}
 
 
 def parse_rates(text):
@@ -642,11 +678,13 @@ def suite_slo(args):
     protocol = protocol_context(args)
     options = args.options.get("slo", {})
     filters = {name[:-len("_points")]: set(value) for name, value in options.items() if name.endswith("_points")}
-    points = slo_points(protocol, args.round, options.get("workloads", ["S1", "W1", "W2"]), args.rates, filters,
+    rates = phase_rates(protocol, args.rates_key or args.layout, args.rates)
+    points = slo_points(protocol, args.round, options.get("workloads", ["S1", "W1", "W2"]), rates, filters,
                         options.get("rate_set"))
     tier = args.slo or protocol["slo"]["bench_goodput_tier"]
-    return run_points(args, "slo", points, protocol,
-                      f"closed-loop S1 and open-loop Poisson grids, --goodput at the {tier} SLO tier")
+    return {**run_points(args, "slo", points, protocol,
+                         f"closed-loop S1 and open-loop Poisson grids, --goodput at the {tier} SLO tier"),
+            "rates": rates, "rates_override": args.rates or None}
 
 
 def suite_soak(args):
@@ -745,12 +783,14 @@ def teacher_forced(base, name, ids):
 
 
 def greedy(base, name, ids, max_tokens):
-    """P2: greedy continuation of a fixed prompt, as token ids."""
+    """P2 and P3: greedy continuation of a fixed prompt: token ids and the chosen tokens' log-probabilities."""
     body = {"model": MODEL, "prompt": ids, "max_tokens": max_tokens, "temperature": 0.0, "logprobs": 1,
             "return_tokens_as_token_ids": True, "cache_salt": f"parity-p2-{name}"}
     payload, seconds = vs.call(base, "/v1/completions", body, 3600)
     choice = payload["choices"][0]
-    return {"prompt_tokens": len(ids), "generated": [int(t.split(":", 1)[1]) for t in choice["logprobs"]["tokens"]],
+    logprobs = choice["logprobs"]
+    return {"prompt_tokens": len(ids), "generated": [int(t.split(":", 1)[1]) for t in logprobs["tokens"]],
+            "logprobs": [None if v is None else round(v, 5) for v in logprobs.get("token_logprobs") or []],
             "finish_reason": choice.get("finish_reason"), "seconds": round(seconds, 2)}
 
 
@@ -806,16 +846,21 @@ def suite_parity(args):
 
 
 def suite_paritylong(args):
-    protocol_context(args)
+    """P3: greedy continuations of the two 32,768-token documents. Not their prompt logprobs: vLLM computes those as an
+    fp32 log-softmax over every token of a prefill chunk, about 5 GiB for an 8,192-token chunk, which the KV cache leaves
+    no room for (slo_protocol.json parity.p3). bench_stats.py compares the tokens with the job's reference launch."""
+    protocol = protocol_context(args)
     corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
     raw = parity_raw(args, True)
     reset_prefix_cache(args.base)
     for name, ids in parity_documents(args.base, corpus, long=True):
-        raw["p1"][name] = teacher_forced(args.base, name, ids)
+        raw["p2"][name] = greedy(args.base, name, ids, protocol["parity"]["p3"]["max_tokens"])
     reset_prefix_cache(args.base)
     path = Path(args.out_dir) / f"parity-{args.tag}-long.json"
     path.write_text(json.dumps(raw))
-    return parity_summary(raw, path)
+    return {**parity_summary(raw, path),
+            "method": "P3: greedy continuations of the two 32,768-token documents of parity_corpus.json with the chosen "
+                      "tokens' log-probabilities; bench_stats.py compares them with the job's reference launch"}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -907,8 +952,16 @@ def suite_screen(args):
     return result
 
 
+def suite_accuracy(args):
+    """The pre-registered accuracy subset against this server. It fails alone: a download or client failure is its
+    result (failed), never an exception that would fail the phase."""
+    import accuracy  # bench/accuracy.py; it imports aml/src/evals.py only here
+    return accuracy.run_suite(args, protocol_context(args))
+
+
 SUITES = {"parity": suite_parity, "paritylong": suite_paritylong, "warmup": suite_warmup, "partr": suite_partr,
-          "slo": suite_slo, "soak": suite_soak, "realtext": suite_realtext, "screen": suite_screen}
+          "slo": suite_slo, "soak": suite_soak, "realtext": suite_realtext, "screen": suite_screen,
+          "accuracy": suite_accuracy}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -941,10 +994,10 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     parser = argparse.ArgumentParser(prog="slo_suites.py")
     commands = parser.add_subparsers(dest="command", required=True)
-    plan = commands.add_parser("plan", help="expand PHASE_PLAN tokens (slo-round) for a round")
+    plan = commands.add_parser("plan", help="expand PHASE_PLAN tokens (slo-round-fp8, slo-round-nvfp4) for a round")
     plan.add_argument("names", nargs="*")
-    plan.add_argument("--layouts", default="", help="ROUND_LAYOUTS: the candidates compared with A (default: the protocol's)")
-    plan.add_argument("--record", help="also write {round, layouts, plan} to this JSON file (for the package)")
+    plan.add_argument("--layouts", default="", help="ROUND_LAYOUTS: the round job's candidates (default: the frozen list)")
+    plan.add_argument("--record", help="also write the plan record (round, job, reference, control, layouts) to this file")
     spec = commands.add_parser("phase-spec", help="settings of one protocol phase")
     spec.add_argument("name")
     spec.add_argument("--json", action="store_true")
@@ -973,11 +1026,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     protocol = load_protocol(args.protocol)
     if args.command == "plan":
-        layouts = round_layouts(protocol, args.layouts)
-        expanded = expand_plan(protocol, args.names, args.round, layouts)
+        expanded, record = plan_record(protocol, args.round, args.names, args.layouts)
         if args.record:
-            Path(args.record).write_text(json.dumps({"round": args.round, "tokens": args.names, "plan": expanded,
-                                                     "layouts": layouts if "slo-round" in args.names else []}))
+            Path(args.record).write_text(json.dumps(record))
+        if record["deviation"]:
+            print(f"ROUND_LAYOUTS={','.join(record['layouts'])} differs from the frozen {','.join(record['frozen_layouts'])}: "
+                  "recorded as a deviation", file=sys.stderr)
         print(" ".join(expanded))
         return 0
     if args.command == "phase-spec":

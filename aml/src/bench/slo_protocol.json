@@ -1,12 +1,17 @@
 {
  "schema": "axk2-slo-protocol/1",
  "title": "A.X K2 serving re-measurement protocol on 2 x ND96amsr A100 v4 (vLLM v0.23.0)",
- "status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit with the chosen ROUND_LAYOUTS; publish every run, including invalid and aborted runs.",
+ "status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
  "doc": "docs/BENCHMARK_PROTOCOL.md",
  "assumptions": [
   "The SLO tiers are assumptions until the customer agrees them (or supplies its own) before round 1.",
-  "The common --max-model-len of 131072 must be at least the customer's longest input plus output and at most C2's auto-fitted 238,656 tokens; if the customer needs 262,144 tokens, C2 leaves the candidate list.",
+  "The common --max-model-len of 131072 must be at least the customer's longest input plus output; every round layout held it in the screening, and the round-1 capacity phases (cap-*) record each layout's KV-fitted maximum.",
   "Prices change; pull the Azure retail prices again on the publication date."
+ ],
+ "deviations": [
+  {"date": "2026-11-10", "what": "C8m and D24 run in the rounds although the pre-registered selection rule (screen.selection) chose only B0 and D42",
+   "why": "the user's decision after the screening report: A + B0 + D42 + C8 + D24, all throughput candidates (C8 = the mp-multinode C8m; the Ray C8 cannot start)",
+   "effect": "their comparisons are labelled 'added after screening' in every analyze and report output (rounds.selection)"}
  ],
  "checkpoints": {
   "fp8": {"repo": "skt/A.X-K2", "revision": "4237c6a60cec6ae449854870d01a42665a1166aa", "size_gb": 694.4},
@@ -76,6 +81,8 @@
           "note": "The integrated review wrote 4,096 tokens and 32 sequences: half of the earlier 64 sequences. With the common 128, half is 64."},
   "D": {"description": "NVFP4 TP8 on node0 only (multiprocessing executor)", "checkpoint": "nvfp4", "nodes": 1, "gpus": 8,
         "args": ["--tensor-parallel-size", "8", "--pipeline-parallel-size", "1", "--distributed-executor-backend", "mp"]},
+  "D2": {"description": "D relaunched at the end of the NVFP4 round job (D-prime): the NVFP4 job's launch-noise and drift control", "same_as": "D",
+         "same_rates": true},
   "C1": {"description": "FP8 TP8 x PP2 + EP8 per stage (diagnostic)", "checkpoint": "fp8", "nodes": 2, "gpus": 16,
          "args": ["--tensor-parallel-size", "8", "--pipeline-parallel-size", "2", "--distributed-executor-backend", "ray",
                   "--enable-expert-parallel"]},
@@ -169,12 +176,14 @@
          "note": "vLLM 0.23 deprecates kv_role kv_both for NixlConnector (docs/features/nixl_connector_usage.md); the proxy follows tests/v1/kv_connector/nixl_integration/toy_proxy_server.py of v0.23.0. NIXL moves the KV cache over UCX, not NCCL: node0's InfiniBand counters per point show where it went. Each server sets VLLM_NIXL_SIDE_CHANNEL_HOST to its own node address at start."}
  },
  "phases": {
-  "slo-A": {"layout": "A", "suites": ["parity", "warmup", "partr", "slo", "realtext", "soak", "paritylong"]},
+  "slo-A": {"layout": "A", "suites": ["parity", "warmup", "partr", "slo", "realtext", "soak", "accuracy", "paritylong"]},
   "slo-C2": {"layout": "C2", "suites": ["parity", "warmup", "partr", "slo", "realtext", "soak", "paritylong"]},
-  "slo-D": {"layout": "D", "suites": ["parity", "warmup", "partr", "slo", "soak", "paritylong"]},
+  "slo-D": {"layout": "D", "suites": ["parity", "warmup", "partr", "slo", "realtext", "soak", "accuracy", "paritylong"]},
   "slo-C2s": {"layout": "C2s", "suites": ["warmup", "partr", "slo"],
               "options": {"partr": "c32", "slo": {"workloads": ["W1"], "W1_points": [1, 2]}}},
   "slo-A2": {"layout": "A2", "suites": ["parity", "warmup", "partr", "slo", "paritylong"],
+             "options": {"slo": {"workloads": ["W1"], "W1_points": [1, 2]}}},
+  "slo-D2": {"layout": "D2", "suites": ["parity", "warmup", "partr", "slo", "paritylong"],
              "options": {"slo": {"workloads": ["W1"], "W1_points": [1, 2]}}},
   "cap-A": {"layout": "A", "max_model_len": "capacity", "suites": ["functional"]},
   "cap-C2": {"layout": "C2", "max_model_len": "capacity", "suites": ["functional"]},
@@ -214,7 +223,7 @@
   "scr-Dref": {"layout": "D", "label": "Dref", "suites": ["screen"], "options": {"screen": {"steps": ["facts", "parity"]}}}
  },
  "phase_templates": {
-  "note": "PHASE_PLAN tokens <kind>-<layout> for a layout without an explicit phase (round candidates chosen by the screening): slo- (slo-sensitivity for a sensitivity layout), cap-, dx1-, dx2- and scr-. Explicit phases win; experimental layouts get none.",
+  "note": "PHASE_PLAN tokens <kind>-<layout> for a layout without an explicit phase (round candidates chosen by the screening): slo- (slo-sensitivity for a sensitivity layout), cap-, dx1-, dx2- and scr-. Explicit phases win; experimental layouts get none. The tokens slo-round-fp8 and slo-round-nvfp4 expand into a round job's phases (rounds.jobs).",
   "slo": {"suites": ["parity", "warmup", "partr", "slo", "realtext", "soak", "paritylong"]},
   "slo-sensitivity": {"suites": ["warmup", "partr", "slo"], "options": {"partr": "c32", "slo": {"workloads": ["W1"], "W1_points": [1, 2]}}},
   "cap": {"max_model_len": "capacity", "suites": ["functional"]},
@@ -226,16 +235,29 @@
  "rounds": {
   "minimum": 3,
   "maximum": 5,
-  "design": "A -> the candidates in the round's order -> (sensitivity runs in round 1) -> A2 -> (capacity phases in round 1); the A baseline of a round is the geometric mean of A and A2 for the metrics both launches measured",
-  "layouts": ["C2", "D"],
+  "design": "Each round is two jobs that may run at the same time (at most three ND96 nodes): the FP8 job on two nodes and the NVFP4 job on one node, so no NVFP4 layout leaves a second node idle. A job runs its reference -> its candidates in the round's order -> (round 2) the sensitivity runs -> its control -> (round 2) the capacity phases. A job's baseline of a round is the geometric mean of its reference and its control (A and A2, D and D2) for the metrics both launches measured.",
+  "jobs": {
+   "fp8": {"token": "slo-round-fp8", "template": "aml/jobs/slo-round-fp8-nd96.yml", "nodes": 2, "checkpoint": "fp8",
+           "reference": "A", "control": "A2", "layouts": ["B0", "C8m"]},
+   "nvfp4": {"token": "slo-round-nvfp4", "template": "aml/jobs/slo-round-nvfp4-nd96.yml", "nodes": 1, "checkpoint": "nvfp4",
+             "reference": "D", "control": "D2", "layouts": ["D42", "D24"]}
+  },
   "layouts_env": "ROUND_LAYOUTS",
-  "layouts_rule": "The candidates compared with A: ROUND_LAYOUTS (comma-separated, printed by `bench_stats.py select` from the screening) or this list. Odd rounds run them in the listed order, even rounds in reverse (C2,D: round 1 C2 then D, round 2 D then C2). Fix ROUND_LAYOUTS before round 1 and keep it for every round; rounds 4 and 5 run only if the extension rule fires.",
-  "sensitivity_rounds": [1],
-  "sensitivity": "<X>s for every candidate X that has a sensitivity layout (C2s, C4s, C8s, C16s, C4ms, C8ms, C16ms): X's per-engine limits divided by its DP size, so its system-wide budget equals A's",
-  "capacity_rounds": [1],
-  "capacity": "cap-A and cap-<X> for every candidate X",
+  "layouts_rule": "A round job compares its candidates with its reference: ROUND_LAYOUTS (comma-separated) or the job's frozen list. A candidate must be a layout of the job's checkpoint that fits its nodes and is neither the reference, its relaunch, a sensitivity nor an experimental layout. Odd rounds run the candidates in the listed order, even rounds in reverse (B0,C8m: round 1 B0 then C8m, round 2 C8m then B0). A ROUND_LAYOUTS that differs from the frozen list runs and is recorded as a deviation (protocol-plan.json). Rounds 4 and 5 run only if the extension rule fires.",
+  "selection": {"date": "2026-11-10", "pre_registered": ["B0", "D42"], "added_after_screening": ["C8m", "D24"],
+                "label": "added after screening",
+                "rule": "screen.selection chose B0 (FP8) and D42 (NVFP4); the D x 2 decision passed",
+                "decision": "After the screening report (docs/report/SCREENING_2026-11-10.md) the user chose 'A + B0 + D42 + C8 + D24' (all throughput candidates, about 76 node-hours, about $980); C8 is the mp-multinode layout C8m because the Ray C8 cannot start"},
+  "order": "reference; candidates as listed in odd rounds, reversed in even rounds; (round 2) sensitivity runs; control; (round 2) cap-<reference> and cap-<candidate>",
+  "sensitivity_rounds": [2],
+  "sensitivity": "<X>s for every candidate X that has a sensitivity layout (C2s, C4s, C8s, C16s, C4ms, C8ms, C16ms): X's per-engine limits divided by its DP size, so its system-wide budget equals A's. Of the round layouts only C8m has one (C8ms, FP8 job, round 2); B0 and D42 run one engine and D24 (two engines) has no sensitivity layout",
+  "capacity_rounds": [2],
+  "round_two": "the sensitivity run and the capacity phases run in round 2, not round 1 as the integrated review planned: the round-1 jobs carry the 1,000-item accuracy run and must stay under the 12-hour job limit (decided 2026-11-11, before the freeze)",
+  "capacity": "cap-<reference> and cap-<X> for every candidate X of the job",
   "soak_round": 3,
-  "allocations": "Each round is a separate job. Round 3 must run on a different node pair (compare the hashed host names); rounds 1 and 2 may share one."
+  "soak_rates": "SOAK_RATES=<rates key>=<req/s>,...: 0.8 x the mean lambda*(W1, standard SLO) of each layout over the valid rounds 1 and 2 of its job, printed by bench_stats.py analyze (soak_rates); a lambda* known only as a bound uses 0.8 x that bound",
+  "validity": "per round job: it counts only if every measuring suite of its reference, candidates and control reported, none aborted and every planned point has a valid attempt (the soak included in round 3); a comparison uses the rounds in which every job it involves is valid",
+  "allocations": "Every round is a new pair of jobs. The FP8 job of round 3 must run on a different node pair from rounds 1 and 2 (compare the hashed host names); rounds 1 and 2 may share one. A preempted or failed job is resubmitted whole, and only one package per round and job is analyzed."
  },
  "workloads": {
   "R": {"id": 1, "kind": "closed", "description": "Part R: replay of the published 1K/8K/32K x concurrency 1 and 32 matrix",
@@ -261,7 +283,8 @@
   "W1real": {"id": 5, "kind": "open", "description": "W1 lengths with real Korean and English text (aml/src/bench/parity_corpus.json windows, or the customer's JSONL)",
              "dataset": "realtext", "input_len": 1024, "output_len": 512, "arrival_seconds": 360, "min_prompts": 60,
              "window": [60, 360], "drain_timeout": 1800, "rates": [0.6, 1.0], "stride_tokens": 16, "slo_from": "W1",
-             "checkpoints": ["fp8"]},
+             "checkpoints": ["fp8"], "layouts": ["D", "D42", "D24"],
+             "note": "every round layout runs it with its full suites: the FP8 phases by checkpoint (A, B0, C8m) and the NVFP4 round layouts by name (D, D42, D24; the user's decision of 2026-11-11); real-text expert routing can differ from random tokens in the EP layouts C8m and D24"},
   "soak": {"id": 6, "kind": "open", "description": "W1 at 0.8 x lambda* of the standard SLO for 45 minutes (soak round only)",
            "input_len": 1024, "output_len": 512, "arrival_seconds": 2700, "min_prompts": 60, "window": [60, 2700],
            "drain_timeout": 1800, "rate_fraction_of_lambda_star": 0.8, "slo_from": "W1",
@@ -274,6 +297,30 @@
              "input_lens": [1024, 8192], "output_len": 64, "prompts": 32, "concurrency": 32, "timeout": 900}
  },
  "rate_sets": {"dx2": {"W1": [0.5, 1.2, 2.0, 3.0], "W2": [0.1, 0.24, 0.4, 0.6]}},
+ "rate_grids": {
+  "status": "pre-registered from the screening (docs/report/SCREENING_2026-11-10.md) and fixed for every round by the freeze commit",
+  "lookup": "a phase looks its grid up under its rates key (its own layout name; A2, D2 and the sensitivity layouts use their base layout's, dx2-D uses Dx2): SLO_RATES_<key> (an override, reported as a deviation) > grids.<key> > the phase's rate set > the workload's rates",
+  "rule": {
+   "W1": "every round layout met the standard SLO with goodput 1.0 at 0.6 req/s (scr-* W1 point), D missed it at 1.0 req/s (goodput 0.55, scr-Dx1) and every other round layout had a higher W1 TPOT p90 at 0.6 req/s than D (68-86 ms against 62 ms), so every lambda* is expected between 0.6 and 1.0 req/s; the grid keeps both measured rates, adds their geometric mean (0.78) and 0.45 = 0.75 x 0.6 for the strict tier (D's strict lambda* lay between 0.25 and 0.6)",
+   "W2": "no layout ran W2 in the screening; lambda*(W2) is estimated as 0.5 / P, P = the 8K prefill time at concurrency 1 (R/isl8192-c1 TTFT p50), i.e. prefill busy half the time; the grid runs geometrically from 0.6 x the lowest estimate to 1.4 x the highest",
+   "shared": "one grid per workload for every round layout keeps the per-point metrics (W1/p1, ...) comparable across layouts and jobs; it is what next_grid's rule (0.6 x to 1.4 x lambda*, shared when one grid brackets every layout) gives for these estimates",
+   "Dx2": "twice D's grid, so each replica of dx2-D sees dx1-D's per-server load",
+   "unbracketed": "a lambda* outside its grid is reported as a bound and its comparisons are inconclusive; the grids stay fixed in every round",
+   "strict": "the strict tier is a secondary metric. When the lowest W1 rate (0.45 req/s) already misses the strict SLO, strict lambda* is reported as a bound below the grid (lambda* < 0.45 req/s); expected at least for C8m and D42 (strict goodput at 0.6 req/s in the screening: 0.00 and 0.028) and possibly for other DP x EP and PP layouts. No rate is added for it"
+  },
+  "estimates": {"W2_prefill_seconds": {"A": 2.46, "B0": 2.34, "C8m": 4.39, "D": 2.44, "D42": 2.9, "D24": 2.93},
+                "W2_lambda_star": {"A": 0.2, "B0": 0.21, "C8m": 0.11, "D": 0.2, "D42": 0.17, "D24": 0.17},
+                "note": "ESTIMATES, not measurements"},
+  "grids": {
+   "A": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "B0": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "C8m": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "D": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "D42": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "D24": {"W1": [0.45, 0.6, 0.78, 1.0], "W2": [0.07, 0.11, 0.18, 0.3]},
+   "Dx2": {"W1": [0.9, 1.2, 1.56, 2.0], "W2": [0.14, 0.22, 0.36, 0.6]}
+  }
+ },
  "sampling": {"endpoint": "/v1/completions", "temperature": 0.6, "top_p": 0.95, "ignore_eos": true, "random_range_ratio": 0,
               "percentile_metrics": "ttft,tpot,itl,e2el", "metric_percentiles": "50,90,95,99",
               "never": "--num-warmups (it resends prompt 0, which then hits the prefix cache)"},
@@ -301,13 +348,57 @@
  },
  "parity": {
   "corpus": "aml/src/bench/parity_corpus.json",
-  "p1": {"documents_tokens": 2048, "long_tokens": 32768, "prompt_logprobs": 20, "max_tokens": 1, "temperature": 0,
-         "long_documents_last": "the two 32K documents run in suite paritylong, after the performance points"},
+  "p1": {"documents_tokens": 2048, "prompt_logprobs": 20, "max_tokens": 1, "temperature": 0,
+         "one_at_a_time": "one 2,048-token document per request, sent one after another, so a prefill chunk never holds more than 2,048 tokens of prompt logprobs (about 1.25 GiB of fp32 log-softmax)"},
   "p2": {"prompts": 32, "prompt_tokens": 512, "max_tokens": 256, "temperature": 0, "sequential": true},
-  "reference": "slo-A of the same round",
-  "acceptance_fp8": {"mean_abs_logprob_diff": "<= 2 x (A2 vs A) + 0.005 nats", "top1_agreement": ">= (A2 vs A) - 0.01",
-                     "early_divergence": "a first difference before token 16 on more than 2 of the 32 greedy prompts means the layout is misconfigured"},
-  "nvfp4": "report the differences against A; quality equivalence needs the separate accuracy subset (KoBALT 200 + CLIcK 300, paired McNemar, non-inferiority margin -3 points)"
+  "p3": {"documents": "the two 32,768-token documents of parity_corpus.json (long_documents)", "max_tokens": 64, "temperature": 0,
+         "logprobs": 1, "suite": "paritylong, the last suite of a phase",
+         "compare": "against the job's reference launch: index of the first differing generated token, position-wise token agreement, and mean |delta logprob| of the chosen tokens before the first difference; the control's values (A2, D2) are the floor",
+         "suspect_before": 4,
+         "suspect": "suspect when the continuations of both long documents differ from the reference's before token 4: reported per launch and investigated before the results are used; it does not change the round's validity",
+         "why_not_prompt_logprobs": "vLLM 0.23 computes prompt logprobs over a whole prefill chunk (GPUModelRunner._get_prompt_logprobs_dict: compute_logits of every scheduled prompt token, then Sampler.compute_logprobs = log_softmax in float32), so a 32K document in 8,192-token chunks needs about 8,192 x 163,840 x 4 B = 5.0 GiB plus the bf16 logits; the screening left about 1 GiB free at 0.9 (the PD retry 2 prefill server ran out of memory asking 1.25 GiB for a 2,048-token chunk)",
+         "coverage": "64 generated tokens at positions beyond 32,768, where the DSA indexer chooses 2,048 of 32K positions for every token: weaker than teacher-forced logprobs of every position, but within the memory the server has"},
+  "reference": "slo-<reference> of the same round job: slo-A in the FP8 job, slo-D in the NVFP4 job",
+  "acceptance": {"applies": "every candidate and sensitivity run of a round job against its reference, with the job's control as the floor (FP8: A2 vs A; NVFP4: D2 vs D)",
+                 "mean_abs_logprob_diff": "<= 2 x (control vs reference) + 0.005 nats", "top1_agreement": ">= (control vs reference) - 0.01",
+                 "early_divergence": "a first difference before token 16 on more than 2 of the 32 greedy prompts means the layout is misconfigured"},
+  "nvfp4": "NVFP4 and FP8 run in different jobs, so no token-level parity of D against A is computed; quality is the accuracy section's paired comparison (KoBALT 700 + CLIcK 300, McNemar, non-inferiority margin -3 points)"
+ },
+ "accuracy": {
+  "status": "pre-registered NVFP4-against-FP8 accuracy subset: the quality prerequisite of the NVFP4 layouts",
+  "phases": ["slo-A", "slo-D"],
+  "rounds": [1],
+  "pair": {"fp8": "slo-A", "nvfp4": "slo-D"},
+  "datasets": {
+   "kobalt": {"items": 700, "max_tokens": 16384, "source": "aml/src/evals.py KOBALT: snunlp/KoBALT-700 at its pinned revision, sha256-checked",
+              "scorer": "evals.score_kobalt (the last '정답은 X입니다')"},
+   "click": {"items": 300, "max_tokens": 8192, "source": "aml/src/evals.py CLICK: EunsuKim/CLIcK at its pinned revision, 26 files checked by git blob id",
+             "scorer": "evals.score_click"}
+  },
+  "seed": 20261110,
+  "selection": "evals.py sample(): the n items with the smallest sha256('<seed>|sample|<dataset>|<key>'), kept in the dataset's order (all 700 KoBALT items, 300 of the 1,995 CLIcK items); the same items on both servers",
+  "request": {"endpoint": "/v1/chat/completions, streamed", "temperature": 0.0, "top_p": 1.0, "thinking": true,
+              "seed": "per item, from evals.py unit_id", "order": "both datasets shuffled together by sha256('<seed>|order|<dataset>|<key>')"},
+  "scoring": "the final answer after the reasoning (evals.final_answer), scored as evals.py does; a reply that reaches max_tokens counts as wrong (hit_limit)",
+  "concurrency": 32,
+  "attempts": 3,
+  "timeout_seconds": 10800,
+  "data_dir": "/tmp/axk2-accuracy",
+  "comparison": {
+   "difference": "d = accuracy(NVFP4) - accuracy(FP8) over the items both servers scored",
+   "margin": -0.03,
+   "interval": "two-sided 95% Wald interval of a paired difference: d +- 1.96 x sqrt(b + c - (c - b)^2 / n) / n, with b = FP8 right and NVFP4 wrong, c = the reverse",
+   "test": "exact two-sided McNemar test (binomial test of the b + c discordant items with p = 1/2)",
+   "decision": {"non-inferior": "the lower bound of the interval is above the margin", "inferior": "the upper bound is below the margin",
+                "inconclusive": "otherwise"},
+   "primary": "pooled over both datasets (1,000 items); each dataset alone is secondary",
+   "min_paired_fraction": 0.99,
+   "min_partial_pairs": 800,
+   "incomplete": "when at least 99% of the items were scored on both servers the decision is complete; when fewer but at least 800 items were (for example because the 3 h cap fired; the unfinished items are the slowest replies) the same decision rule is applied to those items and reported as partial coverage; below 800 the result is reported without a decision"
+  },
+  "power_note": "ESTIMATE (normal approximation, no true difference): the chance of a non-inferior result at 10% discordant items is about 56% with 500 items and about 85% with 1,000; with 1,000 items about 99% at 5%, 69% at 15% and 56% at 20% discordance. Greedy reasoning chains can disagree on 10-20% of the items",
+  "failure": "a download or client failure fails only the accuracy suite (recorded in <phase>.accuracy.json); the phase's other suites and the round's validity do not depend on it",
+  "cost": "about 2 hours per server (estimate: 700 x 3,478 + 300 x 1,038 completion tokens, the October averages, at about 400 tok/s with 32 in flight); the suite stops at 3 hours"
  },
  "gates": {
   "closed_loop_failed_max": 0,
@@ -332,20 +423,22 @@
   "t_975": {"1": 12.706, "2": 4.303, "3": 3.182, "4": 2.776, "5": 2.571, "6": 2.447, "7": 2.365, "8": 2.306, "9": 2.262},
   "p99_min_requests": 1000,
   "lambda_star": {"goodput_threshold": 0.9, "interpolation": "linear between the last grid rate that meets the threshold and the next one",
-                  "bracket_required": true, "extrapolation": false},
-  "next_grid": "after round 1, four rates from 0.6 x to 1.4 x lambda* (geometric), per workload, shared by every layout when one grid brackets all of them"
+                  "bracket_required": true, "extrapolation": false,
+                  "bound": "outside its grid lambda* is a bound: below the grid when the lowest rate misses the threshold, above the grid when the highest rate still meets it"},
+  "next_grid": "information only: analyze prints four rates from 0.6 x to 1.4 x lambda* (geometric) per workload, shared when one grid brackets every layout; the rounds keep the frozen rate_grids"
  },
  "decision_rules": {
   "comparison": "for metric M and round k, r_k = ln(M_X,k / M_base,k); M_base,k = sqrt(M_A,k x M_A2,k) when A2 measured M, else M_A,k; report exp(mean r) and exp(mean +- t_975(n-1) x sd / sqrt(n)) plus the min and max over rounds",
   "better": ["every round favours X", "the 95% CI of the ratio excludes 1", "|mean r| >= delta_min"],
   "worse": "the mirror image of better",
-  "delta_min": "max(ln 1.05, 2 x max_k |ln(A2_k / A_k)|) of the same metric; for metrics A2 did not measure, the largest such value over the metrics it did measure",
+  "delta_min": "max(ln 1.05, 2 x max_k |ln(A2_k / A_k)|) of the same metric; for metrics A2 did not measure, the largest such value over the metrics it did measure. Comparisons inside the NVFP4 job use its own control (D2); a job without a control would borrow the FP8 job's A/A2 values",
+  "cross_job": "an NVFP4 layout against A compares two jobs of the same round (other nodes, the same seeds and grids); it is labelled cross-job, A's baseline is drift-corrected with A2 as above, and the rounds used are those in which both jobs are valid",
   "equivalent": "the whole 95% CI of the ratio lies in [0.95, 1.05]",
   "equivalent_band": [0.95, 1.05],
   "otherwise": "inconclusive; state the CI",
   "no_bootstrap_across_rounds": "3 rounds give only 10 distinct resamples",
   "extend": {"after_rounds": 3, "max_rounds": 5, "sd_ln_a2_over_a_max": 0.02, "primary_ci_half_width_max": 0.05,
-             "rule": "add rounds (up to 5) when the SD over rounds of ln(A2/A) exceeds 2% for any overlapping primary metric or a primary metric's 95% CI half-width exceeds 5%"},
+             "rule": "add rounds (up to 5) when the SD over rounds of ln(A2/A) exceeds 2% for any overlapping primary metric or a primary metric's 95% CI half-width exceeds 5% in a comparison against A or D; a job extends when a reason involves it (a cross-job comparison involves both jobs)"},
   "a2_limitation": "A2 runs start-up, warm-up, Part R and two W1 rates only, so drift correction applies to those metrics; lambda*, W2 and cost use A alone",
   "ranking": ["lambda_star W1 standard", "cost per 1M output tokens at lambda*", "c1 TPOT", "c1 TTFT"]
  },
@@ -389,8 +482,28 @@
  },
  "dx2": {"phases": ["dx1-D", "dx2-D"], "pass_ratio": 1.9,
          "pass": "lambda*(Dx2) >= 1.9 x lambda*(Dx1) for W1 and W2 at the standard SLO",
+         "job": "aml/jobs/slo-nvfp4-2replica-nd96.yml, once, with round-1 seeds; dx1-D runs on D's grid and dx2-D on twice that grid (rate_grids)",
          "proxy": {"listen": "127.0.0.1:8100", "policy": "least outstanding requests, ties in round-robin order",
                    "script": "aml/src/bench/lb_proxy.py"}},
+ "budget": {
+  "status": "ESTIMATES (not measured): the screening's phase and job durations (docs/report/SCREENING_2026-11-10.md section 7) scaled to the round suites",
+  "user_budget": {"node_hours": 87, "spot_usd": 1130, "tolerance": 0.1,
+                  "decided": "2026-11-11: the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 round layouts); the round layouts on 2026-11-10"},
+  "assumptions": "minutes per phase: start 5-8 (measured), parity 3-7, warm-up 2, Part R 21-24 in round 1 and 14-17 later, slo 77 (S1 10, four W1 rates 28, four W2 rates 34, overload drains 5), realtext 17, P3 1, soak 47, accuracy 120, stop and package 1.5; A2 and D2 run W1 points 1-2 (15); cap 9; job setup 28 (FP8), 21 (NVFP4), 12 (D x 2)",
+  "jobs": [
+   {"job": "dx2", "round": 1, "nodes": 2, "hours": 2.8, "node_hours": 5.7, "phases": "dx1-D 1.3, dx2-D 1.3 (first, before round 1)"},
+   {"job": "fp8", "round": 1, "nodes": 2, "hours": 9.8, "node_hours": 19.6, "phases": "A (with accuracy) 4.2, B0 2.2, C8m 2.2, A2 0.8"},
+   {"job": "nvfp4", "round": 1, "nodes": 1, "hours": 9.7, "node_hours": 9.7, "phases": "D (with accuracy) 4.2, D42 2.2, D24 2.2, D2 0.9"},
+   {"job": "fp8", "round": 2, "nodes": 2, "hours": 8.2, "node_hours": 16.4, "phases": "A 2.0, C8m 2.1, B0 2.0, C8ms 0.5, A2 0.7, caps 0.4"},
+   {"job": "nvfp4", "round": 2, "nodes": 1, "hours": 7.7, "node_hours": 7.7, "phases": "D 2.1, D24 2.1, D42 2.0, D2 0.7, caps 0.4"},
+   {"job": "fp8", "round": 3, "nodes": 2, "hours": 9.7, "node_hours": 19.3, "phases": "A 2.8, B0 2.8, C8m 2.9, A2 0.7 (soak in A, B0, C8m)"},
+   {"job": "nvfp4", "round": 3, "nodes": 1, "hours": 9.6, "node_hours": 9.6, "phases": "D 2.8, D42 2.8, D24 2.8, D2 0.7 (soak in D, D42, D24)"}
+  ],
+  "total_node_hours": 88.0,
+  "total_spot_usd": 1134,
+  "not_included": ["rounds 4 and 5 when the extension rule fires: about 22 node-hours each", "resubmitted jobs after low-priority preemption",
+                   "option: a D24 sensitivity run, about 0.5 node-hours"]
+ },
  "diagnostics": {
   "pairs": [
    {"name": "A1: indexer grid scales with max_model_len", "x": "diag-A", "base": "diag-A-maxlen",
@@ -452,7 +565,7 @@
    "dx2": {"x": "scr-Dx2", "base": "scr-Dx1", "metric": "lambda_star.W1.standard", "ratio_min": 1.9,
            "unbracketed": "a lambda* outside its ladder is a bound; when the bounds cannot decide, the D x 2 job (slo-nvfp4-2replica-nd96.yml) decides with full grids"},
    "pd": "experimental: reported (lambda*, parity, preflight, failures, InfiniBand bytes), never selected in this protocol version. The PD rerun job has no Dx1 or Dx2: PD's pairs then take them from the earlier two-node job and are labelled cross-job.",
-   "output": "ROUND_LAYOUTS=<FP8 choice>,<NVFP4 choice> for slo-round-nd96.yml; round 1 adds <X>s when the FP8 choice has a sensitivity layout"
+   "output": "ROUND_LAYOUTS=<FP8 choice>,<NVFP4 choice>; the FP8 choice is a candidate of the FP8 round job and the NVFP4 choice of the NVFP4 round job (rounds.jobs); round 1 adds <X>s when the FP8 choice has a sensitivity layout"
   },
   "pairs": [
    {"name": "A1: indexer grid scales with max_model_len", "x": "scr-A-auto", "base": "scr-A",

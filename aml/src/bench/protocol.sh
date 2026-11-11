@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# Benchmark-protocol phases of aml/src/bench/slo_protocol.json (docs/BENCHMARK_PROTOCOL.md): slo-* (and the
-# slo-round shorthand), diag-*, cap-*, dx1-*, dx2-* and the screening's scr-*. entry.sh sources this file on
-# every node before the IB probe and the downloads; it does nothing unless PHASE_PLAN names such a phase, so the
-# demo and the older phases never depend on it. Uses log/report/die from entry.sh at source time and its server
+# Benchmark-protocol phases of aml/src/bench/slo_protocol.json (docs/BENCHMARK_PROTOCOL.md): slo-* (and the round
+# job tokens slo-round-fp8 and slo-round-nvfp4), diag-*, cap-*, dx1-*, dx2-* and the screening's scr-*. entry.sh
+# sources this file on every node before the IB probe and the downloads; it does nothing unless PHASE_PLAN names
+# such a phase, so the demo and the older phases never depend on it. Uses log/report/die from entry.sh at source time and its server
 # helpers (wait_healthy, server_facts, failure_tail, parallel_facts, phase_result) when a phase runs.
 #
 # Guards of a protocol phase, unlike plan_phase: one flag set from the protocol for every layout, a pinned

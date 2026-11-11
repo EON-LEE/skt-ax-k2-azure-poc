@@ -27,7 +27,8 @@ PROTOCOL_SH = (SRC / "bench" / "protocol.sh").read_text(encoding="utf-8")
 PROTOCOL = slo_suites.load_protocol()
 SCREEN_TEMPLATES = ("serving-screen-fp8-nd96.yml", "serving-screen-fp8-dp-nd96.yml", "serving-screen-nvfp4-nd96.yml",
                     "serving-screen-nvfp4-2node-nd96.yml", "serving-screen-nvfp4-pd-nd96.yml")
-NEW_TEMPLATES = ("slo-round-nd96.yml", "serving-diag-nd96.yml", "slo-nvfp4-2replica-nd96.yml", "collect-slo-outputs.yml",
+ROUND_TEMPLATES = ("slo-round-fp8-nd96.yml", "slo-round-nvfp4-nd96.yml")
+NEW_TEMPLATES = (*ROUND_TEMPLATES, "serving-diag-nd96.yml", "slo-nvfp4-2replica-nd96.yml", "collect-slo-outputs.yml",
                  *SCREEN_TEMPLATES)
 POSIX_BASH = shutil.which("bash") and sys.platform != "win32"
 
@@ -587,11 +588,8 @@ class TemplateTests(unittest.TestCase):
                     plan = re.search(r'PHASE_PLAN: "([^"]+)"', text).group(1).split()
                     round_ = int(re.search(r'ROUND: "(\d+)"', text).group(1))
                     self.assertTrue(slo_suites.expand_plan(PROTOCOL, plan, round_ or 1))
-        round_job = template("slo-round-nd96.yml")
-        self.assertIn('PHASE_PLAN: "slo-round"', round_job)
-        self.assertIn(f'NVFP4_IN: "hf:{nvfp4}"', round_job)
-        self.assertIn(f"entry.sh none hf:{fp8}", round_job)
-        self.assertGreaterEqual(int(re.search(r"timeout: (\d+)", round_job).group(1)), 36000)
+        self.assertIn(f"entry.sh none hf:{fp8}", template("slo-round-fp8-nd96.yml"))
+        self.assertIn(f"entry.sh none hf:{nvfp4}", template("slo-round-nvfp4-nd96.yml"))
         self.assertIn('RUN_KERNEL_TESTS: "1"', template("serving-diag-nd96.yml"))
         replicas = template("slo-nvfp4-2replica-nd96.yml")
         self.assertIn("FULL_REPO: skt/A.X-K2-NVFP4", replicas)
@@ -635,8 +633,55 @@ class TemplateTests(unittest.TestCase):
                          ("scr-Dref scr-PD", "0", "1"))
         self.assertEqual(re.search(r"timeout: (\d+)", pd).group(1), "10800")
         self.assertEqual(screened, {p for p in PROTOCOL["phases"] if p.startswith("scr-")})
-        self.assertEqual(env_value(template("slo-round-nd96.yml"), "ROUND_LAYOUTS"), ",".join(PROTOCOL["rounds"]["layouts"]))
         self.assertIn("FALLBACK ONLY", template("collect-slo-outputs.yml"))
+
+    def test_round_templates_follow_the_round_jobs(self):
+        jobs = {spec["template"].rsplit("/", 1)[1]: (name, spec) for name, spec in PROTOCOL["rounds"]["jobs"].items()}
+        self.assertEqual(sorted(jobs), sorted(ROUND_TEMPLATES))
+        self.assertFalse((ROOT / "aml" / "jobs" / "slo-round-nd96.yml").exists(), "the single-job round template is gone")
+        budget = PROTOCOL["budget"]
+        for name in ROUND_TEMPLATES:
+            with self.subTest(template=name):
+                text, (job, spec) = template(name), jobs[name]
+                self.assertEqual(env_value(text, "PHASE_PLAN"), spec["token"])
+                self.assertEqual(env_value(text, "ROUND_LAYOUTS"), ",".join(spec["layouts"]))
+                self.assertEqual(env_value(text, "ROUND"), "1")
+                self.assertIn(f"instance_count: {spec['nodes']}", text)
+                self.assertEqual(env_value(text, "IB_PROBE"), "1" if spec["nodes"] > 1 else None)
+                self.assertIsNone(env_value(text, "NVFP4_IN"), "each job stages one checkpoint")
+                self.assertIsNone(env_value(text, "SLO_RATES"), "the frozen grids; an override is a deviation")
+                nvfp4 = env_value(text, "FULL_REPO") == PROTOCOL["checkpoints"]["nvfp4"]["repo"]
+                self.assertEqual("nvfp4" if nvfp4 else "fp8", spec["checkpoint"])
+                self.assertIn(f"entry.sh none hf:{PROTOCOL['checkpoints'][spec['checkpoint']]['revision']}", text)
+                for round_ in (1, 2, 3):
+                    for phase in slo_suites.expand_plan(PROTOCOL, [spec["token"]], round_):
+                        phase_spec = slo_suites.phase_spec(PROTOCOL, phase, round_)
+                        self.assertEqual(phase_spec["checkpoint"], spec["checkpoint"], phase)
+                        self.assertLessEqual(phase_spec["nodes"] * phase_spec["replicas"], spec["nodes"], phase)
+                timeout = int(re.search(r"timeout: (\d+)", text).group(1))
+                longest = max(row["hours"] for row in budget["jobs"] if row["job"] == job)
+                self.assertRegex(text, rf"Expected about\s+{longest} h")
+                self.assertGreaterEqual(timeout, 1.2 * longest * 3600, "a margin over the longest round")
+                self.assertLessEqual(timeout, 43200, "jobs are limited to 12 h")
+        replicas = template("slo-nvfp4-2replica-nd96.yml")
+        self.assertEqual(env_value(replicas, "PHASE_PLAN").split(), PROTOCOL["dx2"]["phases"])
+        dx2 = next(row for row in budget["jobs"] if row["job"] == "dx2")
+        self.assertRegex(replicas, rf"Expected about\s+{dx2['hours']} h")
+        self.assertGreaterEqual(int(re.search(r"timeout: (\d+)", replicas).group(1)), 1.5 * dx2["hours"] * 3600)
+
+    def test_round_budget_adds_up_and_fits_the_users_budget(self):
+        budget = PROTOCOL["budget"]
+        rows = budget["jobs"]
+        self.assertAlmostEqual(sum(row["node_hours"] for row in rows), budget["total_node_hours"], delta=0.3)
+        for row in rows:
+            self.assertAlmostEqual(row["hours"] * row["nodes"], row["node_hours"], delta=0.15, msg=row)
+        self.assertEqual({(row["job"], row["round"]) for row in rows if row["job"] != "dx2"},
+                         {(job, round_) for job in PROTOCOL["rounds"]["jobs"] for round_ in (1, 2, 3)})
+        user = budget["user_budget"]
+        self.assertLessEqual(abs(budget["total_node_hours"] / user["node_hours"] - 1), user["tolerance"])
+        self.assertAlmostEqual(budget["total_spot_usd"], budget["total_node_hours"] * PROTOCOL["prices_usd_per_node_hour"]["spot"],
+                               delta=2)
+        self.assertLessEqual(sum(spec["nodes"] for spec in PROTOCOL["rounds"]["jobs"].values()), 3, "three ND96 nodes at once")
 
     def test_layouts_expected_to_fail_or_relaunch_run_last(self):
         estimates = PROTOCOL["estimates"]["layouts"]
@@ -670,7 +715,7 @@ class TemplateTests(unittest.TestCase):
         old = render_job.manifest_for(template("ep-compare-fp8-nd96.yml"), manifest)
         self.assertNotIn("bench/", old)
         self.assertIn("entry.sh:", old)
-        self.assertEqual(render_job.manifest_for(template("slo-round-nd96.yml"), manifest), manifest)
+        self.assertEqual(render_job.manifest_for(template("slo-round-fp8-nd96.yml"), manifest), manifest)
 
     def test_download_commands_write_the_bench_folder(self):
         names = [p.name for p in render_job.src_files()] + [f"bench/{p.name}" for p in render_job.bench_files()]
@@ -685,7 +730,7 @@ class TemplateTests(unittest.TestCase):
                 return self.data
 
         opener = lambda url, timeout=0: Response(blobs[url.split("/aml/src/", 1)[1]])
-        for name, manifest_used, works in (("slo-round-nd96.yml", manifest, True),
+        for name, manifest_used, works in (("slo-round-nvfp4-nd96.yml", manifest, True),
                                            ("ep-compare-fp8-nd96.yml", manifest, False),
                                            ("ep-compare-fp8-nd96.yml", render_job.manifest_for(
                                                template("ep-compare-fp8-nd96.yml"), manifest), True)):
@@ -748,14 +793,25 @@ class PublicFileTests(unittest.TestCase):
         self.assertIn(f"{prices['on_demand']}달러", doc)
         self.assertIn(f"{prices['spot']}달러", doc)
         self.assertIn(f"{PROTOCOL['server']['max_model_len']['performance']:,}", doc)
-        for phase in ("slo-A", "slo-C2", "slo-D", "slo-A2", "slo-C2s", "dx1-D", "dx2-D", "diag-B0dcp"):
+        for phase in ("slo-A", "slo-B0", "slo-C8m", "slo-D", "slo-D42", "slo-D24", "slo-A2", "slo-C8ms", "slo-D2", "dx1-D",
+                      "dx2-D", "diag-B0dcp", "slo-round-fp8", "slo-round-nvfp4"):
             self.assertIn(f"`{phase}`", doc)
+        for name in (*ROUND_TEMPLATES, "slo-nvfp4-2replica-nd96.yml", "accuracy.py"):
+            self.assertIn(f"`{name}`" if name.endswith(".yml") else name, doc)
+        self.assertNotIn("slo-round-nd96", doc)
+        grids = PROTOCOL["rate_grids"]["grids"]
+        for workload in ("W1", "W2"):
+            self.assertIn(", ".join(f"{r:g}" for r in grids["A"][workload]), doc)
+            self.assertIn(", ".join(f"{r:g}" for r in grids["Dx2"][workload]), doc)
+        budget = PROTOCOL["budget"]
+        self.assertIn(f"약 {budget['total_node_hours']}노드시간", doc)
+        self.assertIn(f"약 {budget['total_spot_usd']:,}달러", doc)
         for phase in (p for p in PROTOCOL["phases"] if p.startswith("scr-")):
             self.assertIn(f"`{phase}`", doc)
         for name in SCREEN_TEMPLATES:
             self.assertIn(f"`{name}`", doc)
         for needle in ("`slo.package`", "`ROUND_LAYOUTS`", "bench_stats.py select", "fetch_results.py show", "대체 경로",
-                       "공용 네트워크 접근이 꺼져", "CPU 클러스터가 없고", "약 195달러", "약 705달러", "약 900달러"):
+                       "공용 네트워크 접근이 꺼져", "CPU 클러스터가 없고", "스크리닝 뒤 추가", "McNemar", "−3%p", "SOAK_RATES"):
             self.assertIn(needle, doc)
 
 

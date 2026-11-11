@@ -74,15 +74,50 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(sorted(p["rate"] for p in dx2), PROTOCOL["rate_sets"]["dx2"]["W1"])
 
     def test_round_plans(self):
-        self.assertEqual(ss.round_plan(PROTOCOL, 1),
-                         ["slo-A", "slo-C2", "slo-D", "slo-C2s", "slo-A2", "cap-A", "cap-C2", "cap-D"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 2), ["slo-A", "slo-D", "slo-C2", "slo-A2"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 3), ["slo-A", "slo-C2", "slo-D", "slo-A2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 1, "fp8"), ["slo-A", "slo-B0", "slo-C8m", "slo-A2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 2, "fp8"),
+                         ["slo-A", "slo-C8m", "slo-B0", "slo-C8ms", "slo-A2", "cap-A", "cap-B0", "cap-C8m"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 3, "fp8"), ["slo-A", "slo-B0", "slo-C8m", "slo-A2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 1, "nvfp4"), ["slo-D", "slo-D42", "slo-D24", "slo-D2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 2, "nvfp4"),
+                         ["slo-D", "slo-D24", "slo-D42", "slo-D2", "cap-D", "cap-D42", "cap-D24"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 5, "nvfp4"), ["slo-D", "slo-D42", "slo-D24", "slo-D2"])
+        self.assertEqual((PROTOCOL["rounds"]["sensitivity_rounds"], PROTOCOL["rounds"]["capacity_rounds"]), ([2], [2]),
+                         "round 1 carries the accuracy run; the sensitivity run and the capacity phases wait for round 2")
         with self.assertRaises(ValueError):
-            ss.round_plan(PROTOCOL, 6)
-        self.assertEqual(ss.expand_plan(PROTOCOL, ["slo-round", "diag-A"], 2)[-1], "diag-A")
-        with self.assertRaises(ValueError):
-            ss.expand_plan(PROTOCOL, ["epc-fp8-tp8pp2"], 1)
+            ss.round_plan(PROTOCOL, 6, "fp8")
+        self.assertEqual(ss.expand_plan(PROTOCOL, ["slo-round-fp8", "diag-A"], 2)[-1], "diag-A")
+        for bad in (["epc-fp8-tp8pp2"], ["slo-round"], ["slo-round-fp8", "slo-round-nvfp4"]):
+            with self.subTest(plan=bad), self.assertRaises(ValueError):
+                ss.expand_plan(PROTOCOL, bad, 1)
+        jobs = PROTOCOL["rounds"]["jobs"]
+        self.assertEqual(ss.round_jobs(PROTOCOL), {"slo-round-fp8": "fp8", "slo-round-nvfp4": "nvfp4"})
+        self.assertEqual((jobs["fp8"]["nodes"], jobs["nvfp4"]["nodes"]), (2, 1), "a 2-node and a 1-node job: three nodes")
+        self.assertEqual((jobs["fp8"]["control"], jobs["nvfp4"]["control"]), ("A2", "D2"), "both jobs relaunch their reference")
+        selection = PROTOCOL["rounds"]["selection"]
+        self.assertEqual(sorted(selection["pre_registered"] + selection["added_after_screening"]),
+                         sorted(jobs["fp8"]["layouts"] + jobs["nvfp4"]["layouts"]))
+        self.assertEqual(selection["added_after_screening"], ["C8m", "D24"])
+        self.assertTrue(any("C8m and D24" in d["what"] for d in PROTOCOL["deviations"]))
+
+    def test_seeds_and_rate_order_are_shared_by_both_round_jobs(self):
+        for round_ in (1, 2, 3):
+            seen = {}
+            for job in ("fp8", "nvfp4"):
+                for phase in ss.round_plan(PROTOCOL, round_, job):
+                    spec = ss.phase_spec(PROTOCOL, phase, round_)
+                    if "slo" not in spec["suites"]:
+                        continue
+                    options = spec["options"].get("slo", {})
+                    filters = {k[:-len("_points")]: set(v) for k, v in options.items() if k.endswith("_points")}
+                    points = ss.slo_points(PROTOCOL, round_, options.get("workloads", ["S1", "W1", "W2"]),
+                                           ss.phase_rates(PROTOCOL, spec["rates_key"]), filters)
+                    for p in points:
+                        self.assertEqual(seen.setdefault(p["name"], p["seed"]), p["seed"], "common random numbers")
+                    order = [p["name"] for p in points if p["workload"] == "W1"]
+                    full = [p["name"] for p in ss.slo_points(PROTOCOL, round_, ["W1"], ss.phase_rates(PROTOCOL, "A"))]
+                    self.assertEqual(order, [n for n in full if n in order], f"{phase}: the round's rate order")
+            self.assertTrue(all(1000000 * round_ <= s < 1000000 * (round_ + 1) for s in seen.values()))
 
     def test_every_phase_gets_the_common_flags(self):
         server = PROTOCOL["server"]
@@ -105,6 +140,7 @@ class PlanTests(unittest.TestCase):
                 self.assertEqual(flags[:len(server["launcher_flags"])], server["launcher_flags"])
                 self.assertEqual(flags[-len(server["common_flags"]):], server["common_flags"])
                 self.assertEqual(spec["env"]["VLLM_SERVER_DEV_MODE"], "1")
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D2")["rates_key"], "D")
         c2s, c2 = ss.phase_spec(PROTOCOL, "slo-C2s"), ss.phase_spec(PROTOCOL, "slo-C2")
         self.assertEqual((c2s["max_num_seqs"], c2s["max_num_batched_tokens"]), (64, 4096))
         self.assertEqual((c2["max_num_seqs"], c2["max_num_batched_tokens"]), (128, 8192))
@@ -246,6 +282,35 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(result["rank"], [1, 3])
         self.assertEqual(result["top1"], [5, 9])
         self.assertEqual(greedy["generated"], [11, 12])
+
+    def test_greedy_keeps_the_chosen_logprobs(self):
+        payload = {"choices": [{"logprobs": {"tokens": ["token_id:11", "token_id:12"], "token_logprobs": [-0.123456, None]},
+                                "finish_reason": "length"}]}
+        with mock.patch.object(ss.vs, "call", return_value=(payload, 0.5)):
+            result = ss.greedy("http://x", "d@0", [1, 2], 2)
+        self.assertEqual((result["generated"], result["logprobs"], result["finish_reason"]), ([11, 12], [-0.12346, None], "length"))
+
+    def test_long_check_is_greedy_without_prompt_logprobs(self):
+        bodies = []
+
+        def call(base, path, body, timeout):
+            bodies.append(body)
+            return {"choices": [{"logprobs": {"tokens": [f"token_id:{i}" for i in range(body["max_tokens"])],
+                                              "token_logprobs": [-0.5] * body["max_tokens"]}, "finish_reason": "length"}]}, 1.0
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(ss.vs, "call", call), \
+                mock.patch.object(ss, "tokenize", lambda base, text, special: list(range(40000))), \
+                mock.patch.object(ss, "reset_prefix_cache", lambda base: True):
+            result = ss.suite_paritylong(args(out_dir=folder))
+            raw = json.loads(Path(folder, "parity-slo-A-long.json").read_text())
+        self.assertEqual(len(bodies), 2, "the two long documents")
+        for body in bodies:
+            self.assertNotIn("prompt_logprobs", body, "no fp32 log-softmax over a whole prefill chunk")
+            self.assertEqual((len(body["prompt"]), body["max_tokens"], body["temperature"], body["logprobs"]),
+                             (32768, PROTOCOL["parity"]["p3"]["max_tokens"], 0.0, 1))
+        self.assertEqual(raw["long"], True)
+        self.assertEqual(raw["p1"], {})
+        self.assertEqual(sorted(raw["p2"]), sorted(json.loads(ss.CORPUS.read_text(encoding="utf-8"))["long_documents"]["names"]))
+        self.assertTrue(result["method"].startswith("P3"))
 
     def test_long_documents_follow_the_corpus_rule(self):
         corpus = {"tokens_per_document": 4, "documents": [{"id": "a", "text": "ab"}, {"id": "b", "text": "cd"}],
@@ -406,27 +471,77 @@ class ScreeningLayoutTests(unittest.TestCase):
 
 class RoundLayoutTests(unittest.TestCase):
     def test_round_plan_takes_the_selected_layouts(self):
-        self.assertEqual(ss.round_plan(PROTOCOL, 1, "C4,D24"),
-                         ["slo-A", "slo-C4", "slo-D24", "slo-C4s", "slo-A2", "cap-A", "cap-C4", "cap-D24"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 2, "C4,D24"), ["slo-A", "slo-D24", "slo-C4", "slo-A2"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 3, "A4,E"), ["slo-A", "slo-A4", "slo-E", "slo-A2"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 1, "B0dcp"), ["slo-A", "slo-B0dcp", "slo-A2", "cap-A", "cap-B0dcp"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 1, ""), ss.round_plan(PROTOCOL, 1))
-        for bad in ("A", "A2", "C2s", "PD", "X9", "C4,C4"):
-            with self.subTest(layouts=bad), self.assertRaises(ValueError):
-                ss.round_plan(PROTOCOL, 1, bad)
-        self.assertEqual(ss.expand_plan(PROTOCOL, ["slo-round", "scr-C8"], 2, ["C4", "D"])[-1], "scr-C8")
+        self.assertEqual(ss.round_plan(PROTOCOL, 2, "fp8", "C4,A4"),
+                         ["slo-A", "slo-A4", "slo-C4", "slo-C4s", "slo-A2", "cap-A", "cap-C4", "cap-A4"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 3, "fp8", "C4,B0dcp"), ["slo-A", "slo-C4", "slo-B0dcp", "slo-A2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 3, "nvfp4", "E,D8"), ["slo-D", "slo-E", "slo-D8", "slo-D2"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 1, "fp8", ""), ss.round_plan(PROTOCOL, 1, "fp8"))
+        for job, bad in (("fp8", "A"), ("fp8", "A2"), ("fp8", "C2s"), ("fp8", "PD"), ("fp8", "X9"), ("fp8", "C4,C4"),
+                         ("fp8", "D42"), ("nvfp4", "D"), ("nvfp4", "D2"), ("nvfp4", "C8m"), ("nvfp4", "PD"), ("nvfp4", "A")):
+            with self.subTest(job=job, layouts=bad), self.assertRaises(ValueError):
+                ss.round_plan(PROTOCOL, 1, job, bad)
+        self.assertEqual(ss.expand_plan(PROTOCOL, ["slo-round-nvfp4", "scr-D8"], 2, ["D24"])[-1], "scr-D8")
+        uncontrolled = json.loads(json.dumps(PROTOCOL))
+        uncontrolled["rounds"]["jobs"]["nvfp4"]["control"] = None
+        self.assertEqual(ss.round_plan(uncontrolled, 3, "nvfp4"), ["slo-D", "slo-D42", "slo-D24"])
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D2", 2)["suites"], ["parity", "warmup", "partr", "slo", "paritylong"])
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D2", 2)["options"], ss.phase_spec(PROTOCOL, "slo-A2", 2)["options"],
+                         "D2 mirrors A2")
 
     def test_generic_phases_for_selected_layouts(self):
         c4, d24 = ss.phase_spec(PROTOCOL, "slo-C4", 1), ss.phase_spec(PROTOCOL, "slo-D24", 3)
         self.assertEqual(c4["suites"], ["parity", "warmup", "partr", "slo", "realtext", "paritylong"])
-        self.assertEqual(d24["suites"], ["parity", "warmup", "partr", "slo", "soak", "paritylong"], "no realtext for NVFP4")
+        self.assertEqual(d24["suites"], ["parity", "warmup", "partr", "slo", "realtext", "soak", "paritylong"],
+                         "W1real for every NVFP4 round layout")
         c4s = ss.phase_spec(PROTOCOL, "slo-C4s", 1)
         self.assertEqual((c4s["suites"], c4s["rates_key"], c4s["options"]["partr"]), (["warmup", "partr", "slo"], "C4", "c32"))
         self.assertEqual(ss.phase_spec(PROTOCOL, "cap-C8", 1)["max_model_len"], -1)
         dx2 = ss.phase_spec(PROTOCOL, "dx2-D24", 1)
         self.assertEqual((dx2["label"], dx2["replicas"], dx2["rates_key"], dx2["proxy"]), ("D24x2", 2, "Dx2", "lb"))
-        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D", 1)["suites"], PROTOCOL["phases"]["slo-D"]["suites"][:4] + ["paritylong"])
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D", 1)["suites"],
+                         ["parity", "warmup", "partr", "slo", "realtext", "accuracy", "paritylong"],
+                         "accuracy before the long check, which stays last")
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-D", 3)["suites"],
+                         ["parity", "warmup", "partr", "slo", "realtext", "soak", "paritylong"])
+        self.assertEqual(ss.phase_spec(PROTOCOL, "slo-A", 1)["suites"],
+                         ["parity", "warmup", "partr", "slo", "realtext", "accuracy", "paritylong"])
+        for phase in ("slo-A2", "slo-D2", "slo-B0", "slo-C8m", "slo-D42", "slo-D24"):
+            self.assertNotIn("accuracy", ss.phase_spec(PROTOCOL, phase, 1)["suites"], phase)
+        for phase in ("slo-D42", "slo-D24", "slo-B0", "slo-C8m"):
+            self.assertIn("realtext", ss.phase_spec(PROTOCOL, phase, 1)["suites"], phase)
+        for phase in ("slo-E", "slo-D2", "slo-A2"):
+            self.assertNotIn("realtext", ss.phase_spec(PROTOCOL, phase, 1)["suites"], phase)
+        fp8_only = json.loads(json.dumps(PROTOCOL))
+        fp8_only["workloads"]["W1real"]["layouts"] = []
+        self.assertNotIn("realtext", ss.phase_spec(fp8_only, "slo-D24", 1)["suites"])
+        for phase in PROTOCOL["phases"]:
+            suites = PROTOCOL["phases"][phase]["suites"]
+            if "paritylong" in suites:
+                self.assertEqual(suites[-1], "paritylong", f"{phase}: the long check runs last")
+
+    def test_frozen_rate_grids_and_overrides(self):
+        grids, ran = PROTOCOL["rate_grids"]["grids"], []
+        fake = lambda arguments, suite, points, protocol, method: ran.append(points) or {"points": []}
+        with mock.patch.object(ss, "run_points", fake):
+            frozen = ss.suite_slo(args(phase="slo-C8m", layout="C8", rates_key="C8m", options={"slo": {"workloads": ["W1", "W2"]}}))
+            override = ss.suite_slo(args(phase="slo-C8m", layout="C8", rates_key="C8m", rates={"W1": [0.5, 0.7]},
+                                         options={"slo": {"workloads": ["W1", "W2"]}}))
+            ss.suite_slo(args(phase="dx2-D", layout="Dx2", rates_key="Dx2", options={"slo": {"workloads": ["W1"], "rate_set": "dx2"}}))
+        rates = lambda points, workload: sorted(p["rate"] for p in points if p["workload"] == workload)
+        self.assertEqual((rates(ran[0], "W1"), rates(ran[0], "W2")), (grids["C8m"]["W1"], grids["C8m"]["W2"]))
+        self.assertEqual((rates(ran[1], "W1"), rates(ran[1], "W2")), ([0.5, 0.7], grids["C8m"]["W2"]))
+        self.assertEqual((frozen["rates_override"], override["rates_override"]), (None, {"W1": [0.5, 0.7]}))
+        self.assertEqual(rates(ran[2], "W1"), grids["Dx2"]["W1"], "the frozen grid wins over the screening's rate set")
+        for workload in ("W1", "W2"):
+            self.assertEqual(grids["Dx2"][workload], [round(2 * r, 2) for r in grids["D"][workload]])
+        names = {name for spec in PROTOCOL["rounds"]["jobs"].values() for name in (spec["reference"], *spec["layouts"])}
+        self.assertTrue(names <= set(grids), "every round layout has a frozen grid")
+        self.assertEqual(len({json.dumps(grids[name]) for name in names}), 1, "one grid per workload for every layout")
+        self.assertTrue({0.6, 1.0} <= set(grids["A"]["W1"]), "the screening's passing rate and D's failing rate")
+        self.assertEqual(PROTOCOL["workloads"]["W1real"]["rates"], [0.6, 1.0], "W1real at two W1 grid rates")
+        for phase in ("slo-A2", "slo-C8ms", "slo-D2"):
+            spec = ss.phase_spec(PROTOCOL, phase, 1)
+            self.assertEqual(ss.phase_rates(PROTOCOL, spec["rates_key"]), grids[spec["rates_key"]], phase)
 
     def test_rate_keys_are_the_candidates_own_names(self):
         keys = {phase: ss.phase_spec(PROTOCOL, phase, 3)["rates_key"]
@@ -479,22 +594,30 @@ class RoundLayoutTests(unittest.TestCase):
                           sensitivity["rates_key"]), ("mp-multinode", 32, 2048, "C4m"))
         self.assertEqual(ss.phase_spec(PROTOCOL, "cap-C16m", 1)["peer_args"][:6],
                          ["--reasoning-parser", "deepseek_v3", "--max-model-len", "-1", "--gpu-memory-utilization", "0.9"])
-        self.assertEqual(ss.round_plan(PROTOCOL, 1, "C8m,D"),
-                         ["slo-A", "slo-C8m", "slo-D", "slo-C8ms", "slo-A2", "cap-A", "cap-C8m", "cap-D"])
+        self.assertEqual(ss.round_plan(PROTOCOL, 2, "fp8", "C8m"),
+                         ["slo-A", "slo-C8m", "slo-C8ms", "slo-A2", "cap-A", "cap-C8m"])
         self.assertEqual(ss.without_flags(["--a", "1", "--b", "--c", "2"], {"--a": 1, "--b": 0}), ["--c", "2"])
 
     def test_plan_command_records_the_round(self):
         with tempfile.TemporaryDirectory() as folder:
             record = Path(folder, "plan.json")
             with mock.patch("builtins.print") as shown:
-                self.assertEqual(ss.main(["plan", "--round", "2", "--layouts", "C8,D42", "--record", str(record), "slo-round"]), 0)
+                self.assertEqual(ss.main(["plan", "--round", "2", "--layouts", "B0,C8m", "--record", str(record),
+                                          "slo-round-fp8"]), 0)
             data = json.loads(record.read_text())
+            with mock.patch("builtins.print") as deviating:
+                ss.main(["plan", "--round", "1", "--layouts", "D24", "--record", str(record), "slo-round-nvfp4"])
+            nvfp4 = json.loads(record.read_text())
             with mock.patch("builtins.print"):
-                ss.main(["plan", "--round", "0", "--record", str(record), "scr-A", "scr-C4"])
+                ss.main(["plan", "--round", "0", "--layouts", "B0", "--record", str(record), "scr-A", "scr-C4"])
             screening = json.loads(record.read_text())
-        self.assertEqual(shown.call_args[0][0], "slo-A slo-D42 slo-C8 slo-A2")
-        self.assertEqual((data["round"], data["layouts"], data["plan"][1]), (2, ["C8", "D42"], "slo-D42"))
-        self.assertEqual((screening["layouts"], screening["plan"]), ([], ["scr-A", "scr-C4"]))
+        self.assertEqual(shown.call_args[0][0], "slo-A slo-C8m slo-B0 slo-C8ms slo-A2 cap-A cap-B0 cap-C8m")
+        self.assertEqual((data["round"], data["job"], data["reference"], data["control"], data["layouts"], data["deviation"]),
+                         (2, "fp8", "A", "A2", ["B0", "C8m"], False))
+        self.assertEqual((nvfp4["job"], nvfp4["control"], nvfp4["layouts"], nvfp4["frozen_layouts"], nvfp4["deviation"],
+                          nvfp4["plan"]), ("nvfp4", "D2", ["D24"], ["D42", "D24"], True, ["slo-D", "slo-D24", "slo-D2"]))
+        self.assertIn("deviation", " ".join(str(call) for call in deviating.call_args_list))
+        self.assertEqual((screening["job"], screening["layouts"], screening["plan"]), (None, [], ["scr-A", "scr-C4"]))
 
 
 class ScreenSuiteTests(unittest.TestCase):
