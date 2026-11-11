@@ -4,14 +4,18 @@
       Inside the job (protocol.sh, after every phase and on exit) or the workspace (collect-slo-outputs.yml):
       one compact, sanitized package per job from the raw outputs: per point the gates, the steady-state
       summary and per-request data, per-engine counter deltas, GPU telemetry and InfiniBand counters of every
-      node over the point; parity against A of the same round (screening: the job's first launch); the plans,
-      phase results, start records, effective configs, NCCL and clean-state records, load-balancer stats.
+      node over the point; parity against the round job's reference (A or D; screening: the job's first launch)
+      with the P3 long-context check; the accuracy results; the plans, phase results, start records, effective
+      configs, NCCL and clean-state records, load-balancer stats.
       --report sends it through report.py as chunked MLflow tags: slo.package (everything but the points, with
       the list of parts) and slo.package.<launch> (one launch's points), each under 150 chunks of 4,000 chars.
   python3 bench_stats.py analyze <package.json>... --out evidence.json --md summary.md
-      Operator side: round validity, lambda* with the bracket gate, cost per 1M output tokens, paired log-ratio
-      t-CIs with A/A2 drift correction where A2 measured the metric, decision labels, the A/A noise floor and
-      delta_min, the round-extension rule, P99 gating, parity acceptance, soak, D x 2 scaling, diagnostics.
+      Operator side: validity per round job (FP8, NVFP4), lambda* with the bracket gate, cost per 1M output
+      tokens, paired log-ratio t-CIs with drift correction by each job's relaunch (A2, D2) where it measured the
+      metric, decision labels, the relaunch noise floor and delta_min, cross-job comparisons of the NVFP4 layouts
+      with A, 'added after screening' labels, the round-extension rule per job, P99 gating, parity acceptance
+      and the P3 long-context check, soak and the round-3 SOAK_RATES, the paired accuracy comparison (McNemar,
+      non-inferiority), D x 2 scaling, diagnostics.
   python3 bench_stats.py select <screening package.json>... --out selection.json --md selection.md
       The pre-registered selection rule (slo_protocol.json screen.selection): the round candidates
       (ROUND_LAYOUTS), the D x 2 decision and every screened launch's facts, parity and metrics.
@@ -46,6 +50,7 @@ REPORT_FAILURES = ("AXK2_REPORT_WARN mlflow unavailable", "set_tags attempt 4 fa
 TAIL_CHARS = 16384  # node1 server-log tail kept per two-server phase
 LN_105 = math.log(1.05)
 SANITIZE = ((re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<ip>"), (re.compile(r"/mnt/azureml/cr/j/[^/\s\"']+"), "<job>"))
+ACCURACY_KEYS = ("phase", "layout", "failed", "summary", "unscored", "pins", "settings", "item_fields", "items", "seconds")
 POINT_STATS = ("ttft_p50", "ttft_p90", "ttft_p99", "tpot_p50", "tpot_p90", "tpot_p99", "e2e_p50", "e2e_p90",
                "itl_p50", "itl_p99", "output_tok_s")
 
@@ -93,11 +98,14 @@ def phase_entry(protocol, phase):
 
 
 def phase_suites(protocol, phase, round_=None):
-    """The client suites a phase runs: soak only in the soak round, realtext only for the checkpoints of W1real."""
+    """The client suites a phase runs: soak only in the soak round, realtext only for the checkpoints (or layouts)
+    of W1real, accuracy only in the accuracy rounds."""
     entry = phase_entry(protocol, phase)
     checkpoint = resolve_layout(protocol, entry["layout"])["checkpoint"]
+    real = protocol["workloads"]["W1real"]
     return [s for s in entry["suites"] if (s != "soak" or round_ == protocol["rounds"]["soak_round"])
-            and (s != "realtext" or checkpoint in protocol["workloads"]["W1real"]["checkpoints"])]
+            and (s != "realtext" or checkpoint in real["checkpoints"] or entry["layout"] in real.get("layouts", []))
+            and (s != "accuracy" or round_ in protocol.get("accuracy", {}).get("rounds", []))]
 
 
 def ordered(layouts, round_):
@@ -351,7 +359,9 @@ def first_difference(left, right):
 
 
 def parity_compare(candidate, reference):
-    """Teacher-forced (P1) and greedy (P2) agreement of a launch with the reference launch."""
+    """Teacher-forced (P1) and greedy (P2, or P3 for the long documents) agreement of a launch with the reference
+    launch: first differing token, position-wise token agreement and |delta logprob| of the chosen tokens before the
+    first difference."""
     diffs, agreement, documents = [], [], {}
     for name, ref in reference.get("p1", {}).items():
         cand = candidate.get("p1", {}).get(name)
@@ -363,21 +373,44 @@ def parity_compare(candidate, reference):
         agreement += same
         documents[name] = {"positions": len(diff), "mean_abs_logprob_diff": round(mean(diff) or 0, 6),
                            "top1_agreement": round(sum(same) / len(same), 5) if same else None}
-    first = {name: first_difference(candidate["p2"][name]["generated"], ref["generated"])
-             for name, ref in reference.get("p2", {}).items() if name in candidate.get("p2", {})}
+    first, same_tokens, prefix = {}, {}, []
+    for name, ref in reference.get("p2", {}).items():
+        cand = candidate.get("p2", {}).get(name)
+        if not cand:
+            continue
+        first[name] = first_difference(cand["generated"], ref["generated"])
+        same_tokens[name] = round(sum(a == b for a, b in zip(cand["generated"], ref["generated"]))
+                                  / max(1, len(cand["generated"]), len(ref["generated"])), 4)
+        upto = first[name] if first[name] is not None else len(ref["generated"])
+        prefix += [abs(a - b) for a, b in zip((cand.get("logprobs") or [])[:upto], (ref.get("logprobs") or [])[:upto])
+                   if a is not None and b is not None]
     return {"positions": len(diffs), "mean_abs_logprob_diff": round(mean(diffs), 6) if diffs else None,
             "p99_abs_logprob_diff": round(percentile(diffs, 99), 6) if diffs else None,
             "top1_agreement": round(sum(agreement) / len(agreement), 5) if agreement else None,
             "documents": documents, "greedy_prompts": len(first),
             "greedy_identical": sum(v is None for v in first.values()),
             "greedy_diverged_before_16": sum(v is not None and v < 16 for v in first.values()),
-            "greedy_first_difference": first}
+            "greedy_first_difference": first, "greedy_token_agreement": same_tokens,
+            "greedy_prefix_logprob_diff": round(mean(prefix), 6) if prefix else None}
+
+
+def long_check(comparison, rule):
+    """P3 verdict of a launch against its job's reference (slo_protocol.json parity.p3): suspect when the greedy
+    continuation of every long document leaves the reference's before token `suspect_before`."""
+    firsts = comparison.get("greedy_first_difference") or {}
+    if not firsts:
+        return {"status": "no data"}
+    early = [value is not None and value < rule["suspect_before"] for value in firsts.values()]
+    return {"status": "suspect" if all(early) else "ok", "first_difference": firsts,
+            "token_agreement": comparison.get("greedy_token_agreement"),
+            "prefix_logprob_diff": comparison.get("greedy_prefix_logprob_diff")}
 
 
 def parity_acceptance(candidate, floor):
-    """FP8 acceptance against the A2-vs-A floor of the same round (slo_protocol.json parity.acceptance_fp8)."""
+    """Acceptance of a candidate against its job's control-vs-reference floor of the same round (A2 vs A, D2 vs D;
+    slo_protocol.json parity.acceptance)."""
     if not floor or floor.get("mean_abs_logprob_diff") is None or candidate.get("mean_abs_logprob_diff") is None:
-        return {"status": "unknown", "reason": "no A2 or candidate parity in this round"}
+        return {"status": "unknown", "reason": "no control or candidate parity in this round"}
     checks = {"mean_abs_logprob_diff": candidate["mean_abs_logprob_diff"] <= 2 * floor["mean_abs_logprob_diff"] + 0.005,
               "top1_agreement": candidate["top1_agreement"] >= floor["top1_agreement"] - 0.01,
               "early_divergence": candidate["greedy_diverged_before_16"] <= 2}
@@ -460,9 +493,14 @@ def package(root, protocol=None):
         if isinstance(data, dict):
             plans.setdefault(found.group(1), {})[found.group(2)] = {
                 "plan": data.get("plan", []), "aborted": data.get("aborted"), "skipped": data.get("skipped"),
-                "missing": data.get("missing", False)}
+                "missing": data.get("missing", False), **({"rates_override": data["rates_override"]}
+                                                          if data.get("rates_override") else {})}
             if found.group(2) == "screen":
                 screens[found.group(1)] = {k: data.get(k) for k in ("facts", "steps", "aborted", "suite_seconds")}
+    accuracy = {path.name[:-len(".accuracy.json")]: {k: data.get(k) for k in ACCURACY_KEYS}
+                for path in sorted(verify.glob("*.accuracy.json")) for data in [load_json(path)] if isinstance(data, dict)}
+    plan_record = load_json(root / "node0" / "protocol-plan.json")
+    round_reference = f"slo-{(plan_record if isinstance(plan_record, dict) else {}).get('reference') or 'A'}"
     raw = {}
     for path in sorted(verify.glob("parity-*.json")):
         data = load_json(path)
@@ -475,9 +513,12 @@ def package(root, protocol=None):
         if phase.startswith("scr-"):
             reference = screen_reference
         else:
-            reference = "diag-A" if phase.startswith("diag-") else "slo-A"
+            reference = "diag-A" if phase.startswith("diag-") else round_reference  # the round job's reference
         if reference and phase != reference and (reference, long) in raw:
-            parity[f"{phase}{'-long' if long else ''}"] = parity_compare(data, raw[(reference, long)])
+            result = parity_compare(data, raw[(reference, long)])
+            if long and "p3" in protocol.get("parity", {}):
+                result["long_check"] = long_check(result, protocol["parity"]["p3"])
+            parity[f"{phase}{'-long' if long else ''}"] = result
     phases = [json.loads(line) for line in (root / "node0" / "phases.jsonl").read_text().splitlines()
               if line.strip()] if (root / "node0" / "phases.jsonl").exists() else []
     extra = {kind: {path.stem[len(kind) + 1:]: load_json(path) for path in sorted((root / "node0").glob(f"{kind}-*.json"))}
@@ -488,7 +529,7 @@ def package(root, protocol=None):
     rounds = sorted({p["round"] for p in points if p.get("round") is not None})
     return sanitize({"schema": "axk2-slo-package/1", "rounds": rounds, "phases": phases, "plans": plans,
                      "points": points, "parity": parity, "screen_reference": screen_reference, "screens": screens,
-                     "protocol_plan": load_json(root / "node0" / "protocol-plan.json"), "replica_tails": tails,
+                     "protocol_plan": plan_record, "replica_tails": tails, "accuracy": accuracy,
                      "hosts_sha256": {node: hashlib.sha256((h or "").encode()).hexdigest()[:12] for node, h in zip(nodes, hosts)},
                      **{kind.replace("-", "_"): value for kind, value in extra.items()}}, hosts)
 
@@ -605,12 +646,13 @@ def lambda_star(points, threshold=0.9):
         return {"value": None, "bracketed": False, "reason": "fewer than two valid rates"}
     good = [i for i, p in enumerate(points) if p[1] is not None and p[1] >= threshold]
     if not good:
-        return {"value": None, "bracketed": False, "high": points[0][0],
-                "reason": "no rate meets the threshold: the grid starts too high"}
+        return {"value": None, "bracketed": False, "high": points[0][0], "bound": "below the grid",
+                "reason": f"below the grid (lambda* < {points[0][0]:g}): no rate meets the threshold, the grid starts too high"}
     i = good[-1]
     if i == len(points) - 1:
-        return {"value": None, "bracketed": False, "low": points[-1][0],
-                "reason": "the highest rate still meets the threshold: the grid ends too low"}
+        return {"value": None, "bracketed": False, "low": points[-1][0], "bound": "above the grid",
+                "reason": f"above the grid (lambda* > {points[-1][0]:g}): the highest rate still meets the threshold, "
+                          "the grid ends too low"}
     (r0, g0, o0, t0), (r1, g1, o1, t1) = points[i], points[i + 1]
     share = (g0 - threshold) / (g0 - g1)
     blend = lambda a, b: None if a is None or b is None else a + share * (b - a)
@@ -734,26 +776,81 @@ def phase_nodes(protocol, phase):
     return resolve_layout(protocol, entry["layout"]).get("nodes", 1) * entry.get("replicas", 1)
 
 
-def round_layouts(protocol, packages, round_):
-    """The candidates a round compared with A: recorded by protocol.sh (protocol-plan.json), else the default."""
+def package_round(pkg):
+    return (pkg.get("rounds") or [None])[0]
+
+
+def round_jobs(protocol, packages):
+    """{(round, job): plan} from the round packages' protocol-plan.json records: the job's reference, control and
+    candidates, the packages that carry it and whether ROUND_LAYOUTS deviated. A record without a job (the earlier
+    single-job plan) counts as the FP8 job with its recorded candidates."""
+    jobs = {}
     for pkg in packages:
-        plan = pkg.get("protocol_plan") if package_round(pkg) == round_ else None
-        if isinstance(plan, dict) and plan.get("layouts"):
-            return list(plan["layouts"])
-    return list(protocol["rounds"]["layouts"])
+        plan, round_ = pkg.get("protocol_plan"), package_round(pkg)
+        if not isinstance(plan, dict) or not isinstance(round_, int) or round_ < 1:
+            continue
+        job = plan.get("job") or ("fp8" if plan.get("layouts") else None)
+        if not job:
+            continue
+        if (round_, job) in jobs:
+            jobs[(round_, job)]["sources"].append(pkg.get("source"))
+            continue
+        spec = protocol["rounds"]["jobs"].get(job, {})
+        jobs[(round_, job)] = {"job": job, "reference": plan.get("reference") or spec.get("reference", "A"),
+                               "control": plan.get("control") if plan.get("job") else spec.get("control", "A2"),
+                               "layouts": list(plan.get("layouts") or []), "deviation": bool(plan.get("deviation")),
+                               "sources": [pkg.get("source")]}
+    return jobs
 
 
-def comparison_pairs(protocol, layouts):
-    """(candidate, baseline): every candidate against A, then each sensitivity run against A and its layout."""
-    pairs = [(f"slo-{name}", "slo-A") for name in layouts]
-    for name in layouts:
-        if sensitivity_of(protocol, name):
-            pairs += [(f"slo-{sensitivity_of(protocol, name)}", "slo-A"), (f"slo-{sensitivity_of(protocol, name)}", f"slo-{name}")]
+def job_phases(plan, round_):
+    """A round job's comparison phases in the round's order: reference, candidates, control."""
+    return [f"slo-{plan['reference']}", *(f"slo-{n}" for n in ordered(plan["layouts"], round_)),
+            *([f"slo-{plan['control']}"] if plan.get("control") else [])]
+
+
+def phase_jobs(protocol, plans):
+    """{phase: job} of every round phase: reference, candidates, their sensitivity runs and the control."""
+    owner = {}
+    for job, plan in plans.items():
+        names = [plan["reference"], *plan["layouts"], *filter(None, (sensitivity_of(protocol, n) for n in plan["layouts"])),
+                 *([plan["control"]] if plan.get("control") else [])]
+        for name in names:
+            owner.setdefault(f"slo-{name}", job)
+    return owner
+
+
+def comparison_pairs(protocol, plans):
+    """(x, baseline, kind): every candidate against its job's reference, each sensitivity run against the reference
+    and its layout, and the reference and candidates of a job without A against A (cross-job)."""
+    pairs = []
+    for plan in plans.values():
+        reference = f"slo-{plan['reference']}"
+        for name in plan["layouts"]:
+            pairs.append((f"slo-{name}", reference, "within job"))
+            if sensitivity_of(protocol, name):
+                sensitivity = f"slo-{sensitivity_of(protocol, name)}"
+                pairs += [(sensitivity, reference, "sensitivity"), (sensitivity, f"slo-{name}", "sensitivity")]
+    if any(plan["reference"] == "A" for plan in plans.values()):
+        for plan in plans.values():
+            if plan["reference"] != "A":
+                pairs += [(f"slo-{name}", "slo-A", "cross-job") for name in (plan["reference"], *plan["layouts"])]
     return pairs
 
 
-def expected_phases(protocol, round_, layouts=None):
-    return ["slo-A", *(f"slo-{n}" for n in ordered(layouts or protocol["rounds"]["layouts"], round_)), "slo-A2"]
+def selection_label(protocol, phase):
+    """How a round layout entered the rounds (rounds.selection): pre-registered or added after screening; a
+    sensitivity run inherits its layout's label."""
+    try:
+        name = phase_entry(protocol, phase)["layout"]
+    except ValueError:
+        return None
+    layout = protocol["layouts"].get(name, {})
+    base = layout.get("same_as", name) if layout.get("sensitivity") else name
+    selection = protocol["rounds"].get("selection", {})
+    if base in selection.get("added_after_screening", []):
+        return selection.get("label", "added after screening")
+    return "pre-registered" if base in selection.get("pre_registered", []) else None
 
 
 def full_grid(protocol, phase):
@@ -764,12 +861,8 @@ def full_grid(protocol, phase):
     return not any(name.endswith("_points") for name in options)
 
 
-def package_round(pkg):
-    return (pkg.get("rounds") or [None])[0]
-
-
-def round_validity(round_, package_list, chosen, protocol, layouts=None):
-    """A round counts only if every measuring suite of every comparison phase reported, none aborted, and every
+def round_validity(round_, package_list, chosen, protocol, phases):
+    """A round job counts only if every measuring suite of its comparison phases reported, none aborted, and every
     planned point has a valid attempt (in the soak round the soak included)."""
     plans = {}
     for pkg in package_list:
@@ -777,7 +870,7 @@ def round_validity(round_, package_list, chosen, protocol, layouts=None):
             plans.update(pkg.get("plans", {}))
     problems = []
     lost = {launch for pkg in package_list if package_round(pkg) == round_ for launch in pkg.get("missing_launches") or []}
-    for phase in expected_phases(protocol, round_, layouts):
+    for phase in phases:
         if phase in lost:
             problems.append(f"{phase}: a part of the results package never arrived")
         suites = plans.get(phase, {})
@@ -797,6 +890,88 @@ def round_validity(round_, package_list, chosen, protocol, layouts=None):
                 if not hits or not hits[0]["valid"]:
                     problems.append(f"{phase}: {name} has no valid attempt")
     return {"valid": not problems, "problems": problems}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Accuracy: NVFP4 against FP8 on the same items (slo_protocol.json accuracy)
+
+def mcnemar_exact(b, c):
+    """Two-sided exact McNemar p-value: binomial test of the b + c discordant items with p = 1/2."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    return min(1.0, 2 * sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2 ** n)
+
+
+def paired_accuracy(pairs, margin, z=1.959964):
+    """pairs: {item: (FP8 correct, NVFP4 correct)}. d = accuracy(NVFP4) - accuracy(FP8), its two-sided 95% Wald
+    interval for paired proportions, the exact McNemar p-value and the non-inferiority decision for the margin."""
+    n = len(pairs)
+    if not n:
+        return {"n": 0, "decision": "no paired items"}
+    both = sum(1 for f, v in pairs.values() if f and v)
+    b = sum(1 for f, v in pairs.values() if f and not v)
+    c = sum(1 for f, v in pairs.values() if v and not f)
+    d = (c - b) / n
+    half = z * math.sqrt(max(b + c - (c - b) ** 2 / n, 0.0)) / n
+    low, high = d - half, d + half
+    return {"n": n, "accuracy_fp8": (both + b) / n, "accuracy_nvfp4": (both + c) / n, "both_right": both,
+            "fp8_only": b, "nvfp4_only": c, "neither": n - both - b - c, "difference": d, "ci95": [low, high],
+            "mcnemar_p": mcnemar_exact(b, c), "margin": margin,
+            "decision": "non-inferior" if low > margin else "inferior" if high < margin else "inconclusive"}
+
+
+def accuracy_items(result):
+    """{(dataset, key): (correct, gold)} of one server's accuracy result (correct None: no score)."""
+    index = {field: i for i, field in enumerate(result.get("item_fields") or [])}
+    if not {"dataset", "key", "correct", "gold"} <= set(index):
+        return {}
+    return {(row[index["dataset"]], row[index["key"]]): (row[index["correct"]], row[index["gold"]])
+            for row in result.get("items") or []}
+
+
+def accuracy_comparison(packages, protocol):
+    """The pre-registered accuracy comparison: the FP8 and NVFP4 servers' results (accuracy.pair, accuracy rounds),
+    paired by item over both datasets (primary) and per dataset."""
+    settings = protocol.get("accuracy")
+    if not settings:
+        return None
+    found = {}
+    for pkg in packages:
+        if package_round(pkg) not in settings["rounds"]:
+            continue
+        for phase, result in (pkg.get("accuracy") or {}).items():
+            for side, wanted in settings["pair"].items():
+                if phase == wanted and side not in found and isinstance(result, dict):
+                    found[side] = {"phase": phase, "round": package_round(pkg), "source": pkg.get("source"), "result": result}
+    rule = settings["comparison"]
+    out = {"margin": rule["margin"], "rule": rule["decision"], "primary": rule["primary"],
+           "servers": {side: {**{k: f[k] for k in ("phase", "round", "source")},
+                              **{k: f["result"].get(k) for k in ("summary", "failed", "unscored", "pins")}}
+                       for side, f in found.items()}}
+    missing = [settings["pair"][side] for side in ("fp8", "nvfp4") if side not in found]
+    failed = [f"{side}: {f['result']['failed']}" for side, f in found.items() if f["result"].get("failed")]
+    if missing or failed:
+        return {**out, "decision": "missing" if missing else "failed",
+                "problems": [f"no accuracy result of {phase}" for phase in missing] + failed}
+    fp8, nvfp4 = accuracy_items(found["fp8"]["result"]), accuracy_items(found["nvfp4"]["result"])
+    mismatched = sorted(k for k in fp8 if k in nvfp4 and fp8[k][1] != nvfp4[k][1])
+    pairs = {k: (fp8[k][0], nvfp4[k][0]) for k in fp8 if k in nvfp4 and k not in mismatched
+             and fp8[k][0] is not None and nvfp4[k][0] is not None}
+    expected = sum(spec["items"] for spec in settings["datasets"].values())
+    tables = {"pooled": paired_accuracy(pairs, rule["margin"]),
+              **{name: paired_accuracy({k: v for k, v in pairs.items() if k[0] == name}, rule["margin"])
+                 for name in settings["datasets"]}}
+    complete = len(pairs) >= math.ceil(rule["min_paired_fraction"] * expected - 1e-9)
+    partial = not complete and len(pairs) >= rule.get("min_partial_pairs", math.inf)
+    coverage = "complete" if complete else "partial" if partial else "incomplete"
+    problems = [] if complete else [f"{len(pairs)} of {expected} items scored on both servers ("
+                                    + ("decision on those items: partial coverage" if partial else
+                                       f"at least {rule['min_paired_fraction']:.0%} for a complete and "
+                                       f"{rule.get('min_partial_pairs')} for a partial decision needed") + ")"]
+    return {**out, "expected": expected, "paired": len(pairs), "gold_mismatches": len(mismatched),
+            "cross_job": found["fp8"]["source"] != found["nvfp4"]["source"], "tables": tables, "coverage": coverage,
+            "decision": tables["pooled"]["decision"] if complete or partial else "incomplete", "problems": problems}
 
 
 def soak_check(point, rules):
@@ -862,76 +1037,141 @@ def analyze(packages, protocol=None, resamples=None):
         launches.setdefault((round_, phase), []).append(point)
     metrics = {key: launch_metrics(group, protocol, phase_nodes(protocol, key[1]), full_grid(protocol, key[1]))
                for key, group in launches.items()}
-    layouts = {r: round_layouts(protocol, packages, r) for r in rounds}
-    candidates = list(dict.fromkeys(n for r in rounds for n in layouts[r])) or list(protocol["rounds"]["layouts"])
-    validity = {r: round_validity(r, packages, chosen, protocol, layouts[r]) for r in rounds}
+    point_rates = {key: {p["id"]: p.get("rate") for p in group} for key, group in launches.items()}
+    jobs, order = round_jobs(protocol, packages), list(protocol["rounds"]["jobs"])
+    plans = {}
+    for (round_, job), plan in sorted(jobs.items(), key=lambda kv: (order.index(kv[0][1]) if kv[0][1] in order else len(order),
+                                                                  kv[0][0])):
+        merged = plans.setdefault(job, {"job": job, "reference": plan["reference"], "control": plan["control"], "layouts": []})
+        merged["layouts"] += [n for n in plan["layouts"] if n not in merged["layouts"]]
+    by_job = {}
+    for (round_, job), plan in sorted(jobs.items()):
+        result = round_validity(round_, packages, chosen, protocol, job_phases(plan, round_))
+        if len(plan["sources"]) > 1:
+            result = {"valid": False, "problems": [f"round {round_} has {len(plan['sources'])} packages of the {job} job "
+                                                   "(pass one package per round and job)", *result["problems"]]}
+        by_job.setdefault(round_, {})[job] = result
+    validity = {r: {"valid": bool(by_job.get(r)) and all(v["valid"] for v in by_job[r].values()),
+                    "problems": [p for v in by_job.get(r, {}).values() for p in v["problems"]]
+                    or ([] if by_job.get(r) else ["no round job reported a plan (protocol-plan.json) for this round"]),
+                    "jobs": by_job.get(r, {})} for r in rounds}
     valid_rounds = [r for r in rounds if validity[r]["valid"]]
-    series = lambda phase, metric: {r: metrics[(r, phase)][0].get(metric) for r in valid_rounds
-                                    if (r, phase) in metrics and metrics[(r, phase)][0].get(metric) is not None}
+    job_valid = {job: [r for r in rounds if by_job.get(r, {}).get(job, {}).get("valid")] for job in plans}
+    owner = phase_jobs(protocol, plans)
+    rounds_of = lambda *phases: [r for r in rounds if all(r in job_valid.get(owner.get(ph), []) for ph in phases)]
+    series = lambda phase, metric, use: {r: metrics[(r, phase)][0].get(metric) for r in use
+                                         if (r, phase) in metrics and metrics[(r, phase)][0].get(metric) is not None}
     catalogue = protocol["metrics"]["primary"] + protocol["metrics"]["secondary"]
+    primary = {item["id"] for item in protocol["metrics"]["primary"]}
     noise = {}
-    for item in catalogue:
-        a, a2 = series("slo-A", item["id"]), series("slo-A2", item["id"])
-        logs = [math.log(a2[k] / a[k]) for k in a if k in a2 and a[k] > 0 and a2[k] > 0]
-        if logs:
-            noise[item["id"]] = {"log_a2_over_a": [round(v, 6) for v in logs], "max_abs": max(abs(v) for v in logs),
-                                 "sd": statistics.stdev(logs) if len(logs) > 1 else None,
-                                 "delta_min_log": delta_min_log(a, a2)}
-    pooled = max([LN_105] + [n["delta_min_log"] for n in noise.values() if n["delta_min_log"]])
-    comparisons = {}
-    for candidate, baseline in comparison_pairs(protocol, candidates):
+    for job, plan in plans.items():
+        if not plan.get("control"):
+            continue
+        for item in catalogue:
+            use = job_valid.get(job, [])
+            a, a2 = series(f"slo-{plan['reference']}", item["id"], use), series(f"slo-{plan['control']}", item["id"], use)
+            logs = [math.log(a2[k] / a[k]) for k in a if k in a2 and a[k] > 0 and a2[k] > 0]
+            if logs:
+                noise.setdefault(job, {})[item["id"]] = {
+                    "log_a2_over_a": [round(v, 6) for v in logs], "max_abs": max(abs(v) for v in logs),
+                    "sd": statistics.stdev(logs) if len(logs) > 1 else None, "delta_min_log": delta_min_log(a, a2)}
+    pooled = {job: max([LN_105] + [n["delta_min_log"] for n in values.values() if n["delta_min_log"]])
+              for job, values in noise.items()}
+    fp8_job = next((job for job, plan in plans.items() if plan["reference"] == "A"), None)
+
+    def delta_for(base_job, metric):
+        """delta_min of a comparison: the baseline job's control noise, else the FP8 job's A/A2 noise (borrowed)."""
+        source = base_job if base_job in noise else fp8_job if fp8_job in noise else None
+        if source is None:
+            return LN_105, "ln 1.05 (no relaunch control measured)"
+        note = "" if source == base_job else f" (borrowed from the {source} job)"
+        if noise[source].get(metric, {}).get("delta_min_log"):
+            return noise[source][metric]["delta_min_log"], f"{plans[source]['control']} of this metric{note}"
+        return pooled[source], f"pooled {plans[source]['control']} noise{note}"
+
+    comparisons, info = {}, {}
+    for x, base, kind in comparison_pairs(protocol, plans):
+        use, base_job = rounds_of(x, base), owner.get(base)
+        base_plan = plans.get(base_job, {})
+        control = base_plan.get("control") if base == f"slo-{base_plan.get('reference')}" else None
         rows = {}
         for item in catalogue:
-            x, a = series(candidate, item["id"]), series(baseline, item["id"])
-            a2 = series("slo-A2", item["id"]) if baseline == "slo-A" else {}
-            if not x or not a:
-                continue
-            stats = paired_log_ratio(x, a, a2 or None, protocol["statistics"]["t_975"])
             point_id = item["id"].split(".")[0]
-            bound = sorted({f for r in valid_rounds for ph in (candidate, baseline)
+            same = [r for r in use if point_rates.get((r, x), {}).get(point_id) == point_rates.get((r, base), {}).get(point_id)]
+            xs, a = series(x, item["id"], same), series(base, item["id"], same)
+            a2 = series(f"slo-{control}", item["id"], same) if control else {}
+            if not xs or not a:
+                continue
+            stats = paired_log_ratio(xs, a, a2 or None, protocol["statistics"]["t_975"])
+            bound = sorted({f for r in same for ph in (x, base)
                             for f in metrics.get((r, ph), ({}, {}, {}))[1].get(point_id, [])})
-            delta = noise.get(item["id"], {}).get("delta_min_log") or pooled
+            delta, source = delta_for(base_job, item["id"])
             label = "excluded (" + ", ".join(bound) + ")" if bound else decide(
                 stats, item["better"] == "higher", delta, tuple(rules["equivalent_band"]))
-            rows[item["id"]] = {**stats, "better": item["better"], "delta_min_log": delta,
-                                "delta_min_source": "A2 of this metric" if item["id"] in noise else "pooled A2 noise",
-                                "primary": item in protocol["metrics"]["primary"], "decision": label}
-        comparisons[f"{candidate} vs {baseline}"] = rows
+            rows[item["id"]] = {**stats, "better": item["better"], "delta_min_log": delta, "delta_min_source": source,
+                                "primary": item["id"] in primary, "decision": label}
+        name = f"{x} vs {base}"
+        comparisons[name] = rows
+        info[name] = {"kind": kind, "x_job": owner.get(x), "base_job": base_job, "rounds": use,
+                      "selection": selection_label(protocol, x)}
     extend = rules["extend"]
-    reasons = [f"SD of ln(A2/A) of {m} is {n['sd']:.3f}" for m, n in noise.items()
-               if n["sd"] is not None and n["sd"] > extend["sd_ln_a2_over_a_max"]
-               and any(m == p["id"] for p in protocol["metrics"]["primary"])]
+    reasons = {job: [] for job in plans}
+    for job, values in noise.items():
+        plan = plans[job]
+        reasons[job] += [f"SD of ln({plan['control']}/{plan['reference']}) of {m} is {n['sd']:.3f}" for m, n in values.items()
+                         if n["sd"] is not None and n["sd"] > extend["sd_ln_a2_over_a_max"] and m in primary]
+    references = {f"slo-{plan['reference']}" for plan in plans.values()}
     for name, rows in comparisons.items():
-        if not name.endswith(" vs slo-A"):
+        if name.split(" vs ")[1] not in references:
             continue
-        reasons += [f"{name}: 95% CI half-width of {m} is {math.exp(r['ci_half_width_log']) - 1:.1%}"
-                    for m, r in rows.items() if r.get("primary") and r.get("ci_half_width_log")
-                    and r["ci_half_width_log"] > math.log(1 + extend["primary_ci_half_width_max"])]
-    extension = {"rounds_valid": len(valid_rounds),
-                 "recommended": len(valid_rounds) >= extend["after_rounds"] and bool(reasons)
-                 and len(valid_rounds) < extend["max_rounds"],
-                 "evaluated": len(valid_rounds) >= extend["after_rounds"], "reasons": reasons}
-    parity, acceptance = {}, {}
-    fp8 = [f"slo-{n}" for c in candidates for n in (c, sensitivity_of(protocol, c))
-           if n and resolve_layout(protocol, n)["checkpoint"] == "fp8"]
+        found = [f"{name}: 95% CI half-width of {m} is {math.exp(r['ci_half_width_log']) - 1:.1%}"
+                 for m, r in rows.items() if r.get("primary") and r.get("ci_half_width_log")
+                 and r["ci_half_width_log"] > math.log(1 + extend["primary_ci_half_width_max"])]
+        for job in sorted({info[name]["x_job"], info[name]["base_job"]} - {None}):
+            reasons[job] += found
+    per_job = {job: {"rounds_valid": len(job_valid[job]), "evaluated": len(job_valid[job]) >= extend["after_rounds"],
+                     "recommended": len(job_valid[job]) >= extend["after_rounds"] and bool(reasons[job])
+                     and len(job_valid[job]) < extend["max_rounds"], "reasons": reasons[job]} for job in plans}
+    extension = {"rounds_valid": len(valid_rounds), "recommended": any(v["recommended"] for v in per_job.values()),
+                 "evaluated": any(v["evaluated"] for v in per_job.values()), "jobs": per_job,
+                 "reasons": list(dict.fromkeys(r for job in plans for r in reasons[job]))}
+    parity, acceptance, long_context = {}, {}, {}
     for pkg in packages:
         for name, result in pkg.get("parity", {}).items():
             parity[f"round {package_round(pkg)} {name}"] = result
-        floor = pkg.get("parity", {}).get("slo-A2")
-        for phase in fp8:
-            if phase in pkg.get("parity", {}):
-                acceptance[f"round {package_round(pkg)} {phase}"] = parity_acceptance(pkg["parity"][phase], floor)
+            if result.get("long_check"):
+                long_context[f"round {package_round(pkg)} {name[:-len('-long')]}"] = result["long_check"]
+        for plan in plans.values():
+            floor = pkg.get("parity", {}).get(f"slo-{plan['control']}") if plan.get("control") else None
+            for phase in (f"slo-{n}" for c in plan["layouts"] for n in (c, sensitivity_of(protocol, c)) if n):
+                if phase in pkg.get("parity", {}) and plan.get("control"):
+                    acceptance[f"round {package_round(pkg)} {phase}"] = parity_acceptance(pkg["parity"][phase], floor)
     soak = {f"round {p['round']} {p['phase']}": soak_check(p, protocol["workloads"]["soak"]["pass"])
             for p in chosen.values() if p["workload"] == "soak"}
     lambda_table = {f"round {r} {ph}": lam for (r, ph), (_, _, lam) in sorted(metrics.items()) if lam}
+    measured = [f"slo-{n}" for plan in plans.values() for n in (plan["reference"], *plan["layouts"])]
     grid = {}
     for workload in ("W1", "W2"):
         per_phase = {}
-        for phase in ("slo-A", *(f"slo-{n}" for n in candidates)):
+        for phase in dict.fromkeys(measured or ["slo-A"]):
             values = [metrics[(r, phase)][0].get(f"lambda_star.{workload}.standard") for r in valid_rounds
                       if (r, phase) in metrics]
+            values = [v for v in values if v]
             per_phase[phase] = mean(values) if values else None
         grid[workload] = suggest_grid(per_phase)
+    fraction, soak_rates = protocol["workloads"]["soak"]["rate_fraction_of_lambda_star"], {}
+    for job, plan in plans.items():
+        early = [r for r in job_valid.get(job, []) if r < protocol["rounds"]["soak_round"]]
+        for name in (plan["reference"], *plan["layouts"]):
+            phase = f"slo-{name}"
+            values = [metrics[(r, phase)][0].get("lambda_star.W1.standard") for r in early if (r, phase) in metrics]
+            values = [v for v in values if v]
+            bounds = [b.get("low") or b.get("high") for r in early if (r, phase) in metrics
+                      for b in [metrics[(r, phase)][2].get("W1.standard") or {}] if b.get("low") or b.get("high")]
+            if values or bounds:
+                soak_rates[rates_key(protocol, name)] = {
+                    "rate": round(fraction * (mean(values) if values else min(bounds)), 3),
+                    "from": "lambda*" if values else "bound", "rounds": early}
     dx = {}
     for (round_, phase), (values, _, _) in metrics.items():
         kind, _, layout = phase.partition("-")
@@ -955,17 +1195,31 @@ def analyze(packages, protocol=None, resamples=None):
     bootstrap = {}
     if resamples != 0:
         for (round_, phase, point_id), point in sorted(chosen.items()):
-            if point["kind"] == "open" and point["valid"] and round_ in valid_rounds:
+            if point["kind"] == "open" and point["valid"] and round_ in job_valid.get(owner.get(phase), valid_rounds):
                 bootstrap[f"round {round_} {phase} {point_id}"] = bootstrap_point(point, protocol, resamples)
     invalid = [{"round": p["round"], "phase": p["phase"], "point": p["name"], "attempt": p["attempt"],
                 "reasons": p["invalid_reasons"]} for p in points if not p["valid"]]
-    return {"schema": "axk2-slo-evidence/1", "protocol_status": protocol["status"], "rounds": rounds,
-            "round_layouts": {str(r): layouts[r] for r in rounds},
-            "round_validity": validity, "valid_rounds": valid_rounds, "a2_noise": noise,
-            "pooled_delta_min_log": pooled, "comparisons": comparisons, "extension": extension,
+    deviations = [*protocol.get("deviations", []),
+                  *({"round": r, "job": job, "what": f"ROUND_LAYOUTS={','.join(plan['layouts'])} differs from the frozen list"}
+                    for (r, job), plan in sorted(jobs.items()) if plan["deviation"]),
+                  *({"round": package_round(pkg), "phase": phase, "what": f"SLO_RATES override {suites['slo']['rates_override']}"}
+                    for pkg in packages for phase, suites in (pkg.get("plans") or {}).items()
+                    if (suites.get("slo") or {}).get("rates_override"))]
+    return {"schema": "axk2-slo-evidence/2", "protocol_status": protocol["status"], "rounds": rounds,
+            "round_jobs": {str(r): {job: {k: plan[k] for k in ("reference", "control", "layouts", "deviation", "sources")}
+                                    for (rr, job), plan in sorted(jobs.items()) if rr == r} for r in rounds},
+            "round_layouts": {str(r): {job: plan["layouts"] for (rr, job), plan in sorted(jobs.items()) if rr == r}
+                              for r in rounds},
+            "selection": protocol["rounds"].get("selection"), "deviations": deviations,
+            "round_validity": validity, "valid_rounds": valid_rounds, "valid_rounds_by_job": job_valid,
+            "noise": noise, "a2_noise": noise.get(fp8_job, {}), "pooled_delta_min_log": pooled.get(fp8_job, LN_105),
+            "comparisons": comparisons, "comparison_info": info, "extension": extension,
             "lambda_star": lambda_table, "next_grid": grid, "parity": parity, "parity_acceptance": acceptance,
-            "soak": soak, "dx2_scaling": scaling, "diagnostics": diagnostics, "bootstrap_within_launch": bootstrap,
-            "invalid_attempts": invalid,
+            "long_context": long_context,
+            "soak": soak, "soak_rates": {"rule": protocol["rounds"].get("soak_rates"), "rates": soak_rates,
+                                         "env": "SOAK_RATES=" + ",".join(f"{k}={v['rate']:g}" for k, v in soak_rates.items())},
+            "accuracy": accuracy_comparison(packages, protocol), "dx2_scaling": scaling, "diagnostics": diagnostics,
+            "bootstrap_within_launch": bootstrap, "invalid_attempts": invalid,
             "launch_metrics": {f"round {r} {ph}": m for (r, ph), (m, _, _) in sorted(metrics.items())},
             "prices_usd_per_node_hour": protocol["prices_usd_per_node_hour"],
             "slo_assumption": protocol["slo"]["assumption"]}
@@ -1220,13 +1474,24 @@ def fmt(value, digits=3):
 def markdown(evidence):
     lines = ["# Serving protocol results", "", f"- Protocol: {evidence['protocol_status']}",
              f"- SLO: {evidence['slo_assumption']}",
-             f"- Rounds: {evidence['rounds']}; valid: {evidence['valid_rounds']}", ""]
+             f"- Rounds: {evidence['rounds']}; valid in every job: {evidence['valid_rounds']}; valid per job: "
+             + (", ".join(f"{job} {rounds}" for job, rounds in evidence["valid_rounds_by_job"].items()) or "-"), ""]
+    selection = evidence.get("selection") or {}
+    label = selection.get("label") or "added after screening"
+    if selection.get("added_after_screening"):
+        lines.append(f"- {label[0].upper() + label[1:]} ({selection.get('date')}): {', '.join(selection['added_after_screening'])}; "
+                     f"pre-registered: {', '.join(selection.get('pre_registered', []))}")
+    for deviation in evidence.get("deviations") or []:
+        lines.append(f"- Deviation: {deviation.get('what')}" + (f" ({deviation['why']})" if deviation.get("why") else ""))
     for round_, result in evidence["round_validity"].items():
         if not result["valid"]:
             lines.append(f"- Round {round_} is invalid: " + "; ".join(result["problems"][:10]))
     for name, rows in evidence["comparisons"].items():
-        lines += ["", f"## {name}", "", "| metric | ratio | 95% CI | min-max over rounds | rounds | decision |",
-                  "|---|---|---|---|---|---|"]
+        meta = (evidence.get("comparison_info") or {}).get(name, {})
+        tags = [tag for tag in ("cross-job" if meta.get("kind") == "cross-job" else None,
+                                label if meta.get("selection") == label else None) if tag]
+        lines += ["", f"## {name}" + (f" ({', '.join(tags)})" if tags else ""), "",
+                  "| metric | ratio | 95% CI | min-max over rounds | rounds | decision |", "|---|---|---|---|---|---|"]
         for metric, row in rows.items():
             ci = f"{row['ci'][0]:.3f}-{row['ci'][1]:.3f}" if row.get("ci") else "-"
             lines.append(f"| {metric}{' (primary)' if row['primary'] else ''} | {fmt(row.get('ratio'))} | {ci} | "
@@ -1238,13 +1503,32 @@ def markdown(evidence):
             lines.append(f"| {launch} | {key} | {fmt(result.get('value'))} | {result.get('reason', '')} |")
     extension = evidence["extension"]
     lines += ["", f"Round extension: {'recommended' if extension['recommended'] else 'not recommended'}"
-              f"{'' if extension['evaluated'] else ' (fewer than 3 valid rounds)'}. " + "; ".join(extension["reasons"])]
+              f"{'' if extension['evaluated'] else ' (fewer than 3 valid rounds)'}"
+              + "".join(f"; {job}: {'extend' if v['recommended'] else 'no'}" for job, v in (extension.get("jobs") or {}).items())
+              + ". " + "; ".join(extension["reasons"])]
+    if (evidence.get("soak_rates") or {}).get("rates"):
+        lines += ["", f"Round-3 soak rates: `{evidence['soak_rates']['env']}`"]
+    accuracy = evidence.get("accuracy")
+    if accuracy:
+        coverage = " (partial coverage)" if accuracy.get("coverage") == "partial" else ""
+        lines += ["", f"## Accuracy, NVFP4 against FP8 (margin {accuracy['margin']:+.2f}): {accuracy['decision']}{coverage}", ""]
+        lines += [f"- {problem}" for problem in accuracy.get("problems") or []]
+        if accuracy.get("tables"):
+            lines += ["| items | n | FP8 | NVFP4 | difference | 95% CI | McNemar p | decision |", "|---|---|---|---|---|---|---|---|"]
+            for name, row in accuracy["tables"].items():
+                ci = f"{row['ci95'][0]:+.3f} to {row['ci95'][1]:+.3f}" if row.get("ci95") else "-"
+                lines.append(f"| {name} | {row['n']} | {fmt(row.get('accuracy_fp8'))} | {fmt(row.get('accuracy_nvfp4'))} | "
+                             f"{fmt(row.get('difference'))} | {ci} | {fmt(row.get('mcnemar_p'))} | {row['decision']} |")
     if evidence["dx2_scaling"]:
         lines += ["", "## D x 2 scaling", ""] + [f"- {k}: ratio {fmt(v['ratio'])}, passed {v['passed']}"
                                                  for k, v in evidence["dx2_scaling"].items()]
     if evidence["parity_acceptance"]:
-        lines += ["", "## Parity (FP8 acceptance against the A/A2 floor)", ""] + [
+        lines += ["", "## Parity (acceptance against the control-vs-reference floor: A2/A, D2/D)", ""] + [
             f"- {k}: {v['status']}" for k, v in evidence["parity_acceptance"].items()]
+    if evidence.get("long_context"):
+        lines += ["", "## Long-context greedy check (P3, 32K documents, against the job's reference)", ""] + [
+            f"- {k}: {v['status']}; first difference {v.get('first_difference')}, token agreement {v.get('token_agreement')}"
+            for k, v in evidence["long_context"].items()]
     if evidence["soak"]:
         lines += ["", "## Soak", ""] + [f"- {k}: {'passed' if v['passed'] else 'failed: ' + '; '.join(v['problems'])}"
                                         for k, v in evidence["soak"].items()]
@@ -1312,7 +1596,9 @@ def main(argv=None):
     Path(args.out).write_text(json.dumps(evidence, indent=1), encoding="utf-8")
     if args.md:
         Path(args.md).write_text(markdown(evidence), encoding="utf-8")
-    print(json.dumps({"valid_rounds": evidence["valid_rounds"], "extension": evidence["extension"]["recommended"]}))
+    print(json.dumps({"valid_rounds": evidence["valid_rounds"], "valid_rounds_by_job": evidence["valid_rounds_by_job"],
+                      "extension": evidence["extension"]["recommended"], "soak_rates": evidence["soak_rates"]["env"],
+                      "accuracy": (evidence["accuracy"] or {}).get("decision")}))
     return 0
 
 

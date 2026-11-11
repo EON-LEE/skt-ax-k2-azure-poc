@@ -196,6 +196,11 @@ class DecisionTests(unittest.TestCase):
         self.assertAlmostEqual(result["output_tok_s"], 310)
         self.assertIn("ends too low", bs.lambda_star([(0.25, 1.0, 1, 1), (1.5, 0.95, 2, 2)])["reason"])
         self.assertIn("starts too high", bs.lambda_star([(0.25, 0.5, 1, 1), (1.5, 0.1, 2, 2)])["reason"])
+        below = bs.lambda_star([(0.45, 0.2, 1, 1), (0.6, 0.0, 2, 2), (0.78, 0.0, 3, 3), (1.0, 0.0, 4, 4)])
+        self.assertEqual((below["bound"], below["high"], below["value"]), ("below the grid", 0.45, None),
+                         "a strict lambda* under the lowest rate is a bound, never extrapolated")
+        self.assertIn("lambda* < 0.45", below["reason"])
+        self.assertEqual(bs.lambda_star([(0.45, 1.0, 1, 1), (1.0, 0.95, 2, 2)])["bound"], "above the grid")
         wiggle = bs.lambda_star([(0.25, 0.95, 1, 1), (0.6, 0.85, 2, 2), (1.0, 0.92, 3, 3), (1.5, 0.3, 4, 4)])
         self.assertAlmostEqual(wiggle["value"], 1.0 + (0.92 - 0.9) / (0.92 - 0.3) * 0.5)
         self.assertFalse(wiggle["monotonic"])
@@ -247,10 +252,30 @@ class ParityAndTelemetryTests(unittest.TestCase):
         self.assertAlmostEqual(result["top1_agreement"], 0.75)
         self.assertEqual(result["greedy_first_difference"], {"ko-01@0": 2})
         self.assertEqual(result["greedy_diverged_before_16"], 1)
+        self.assertEqual(result["greedy_token_agreement"], {"ko-01@0": 0.75})
         floor = {"mean_abs_logprob_diff": 0.004, "top1_agreement": 0.76, "greedy_diverged_before_16": 0}
         self.assertEqual(bs.parity_acceptance(result, floor)["status"], "pass")
         self.assertEqual(bs.parity_acceptance(dict(result, mean_abs_logprob_diff=0.02), floor)["status"], "fail")
         self.assertEqual(bs.parity_acceptance(result, None)["status"], "unknown")
+
+    def test_long_greedy_check_and_suspect_rule(self):
+        rule = PROTOCOL["parity"]["p3"]
+        tokens = list(range(64))
+        reference = {"p1": {}, "p2": {"long-a": {"generated": tokens, "logprobs": [-0.5] * 64},
+                                      "long-b": {"generated": tokens, "logprobs": [-0.25] * 64}}}
+        late = {"p1": {}, "p2": {"long-a": {"generated": tokens[:40] + [999] * 24, "logprobs": [-0.52] * 64},
+                                 "long-b": {"generated": tokens, "logprobs": [-0.27] * 64}}}
+        result = bs.parity_compare(late, reference)
+        self.assertEqual(result["greedy_first_difference"], {"long-a": 40, "long-b": None})
+        self.assertEqual(result["greedy_token_agreement"], {"long-a": 0.625, "long-b": 1.0})
+        self.assertAlmostEqual(result["greedy_prefix_logprob_diff"], 0.02, "only positions before the first difference")
+        self.assertEqual(bs.long_check(result, rule)["status"], "ok")
+        early = {"p1": {}, "p2": {name: {"generated": [7, 7] + tokens[2:], "logprobs": [-1.0] * 64} for name in ("long-a", "long-b")}}
+        self.assertEqual(rule["suspect_before"], 4)
+        self.assertEqual(bs.long_check(bs.parity_compare(early, reference), rule)["status"], "suspect")
+        one = {"p1": {}, "p2": {"long-a": early["p2"]["long-a"], "long-b": reference["p2"]["long-b"]}}
+        self.assertEqual(bs.long_check(bs.parity_compare(one, reference), rule)["status"], "ok", "suspect needs both documents")
+        self.assertEqual(bs.long_check({}, rule)["status"], "no data")
 
     def test_smi_throttle_and_ib_windows(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -323,13 +348,13 @@ class AnalyzeTests(unittest.TestCase):
         for p in points:
             suite = "partr" if p["workload"] == "R" else "slo"
             plans.setdefault(p["phase"], {}).setdefault(suite, {"plan": []})["plan"].append(p["name"])
-        for phase in ("slo-A", "slo-C2"):
-            plans[phase]["realtext"] = {"plan": []}
-            if round_ == 3:
-                plans[phase]["soak"] = {"plan": []}
-        plans["slo-D"]["soak"] = {"plan": []} if round_ == 3 else None
-        plans["slo-D"] = {k: v for k, v in plans["slo-D"].items() if v is not None}
-        return {"rounds": [round_], "points": points, "plans": plans, "parity": {}}
+        for phase in ("slo-A", "slo-C2", "slo-D"):
+            for suite in ("realtext", "soak"):
+                if suite in bs.phase_suites(PROTOCOL, phase, round_):
+                    plans[phase][suite] = {"plan": []}
+        # The earlier single-job record (no job): read as the FP8 job with its candidates.
+        return {"rounds": [round_], "points": points, "plans": plans, "parity": {},
+                "protocol_plan": {"round": round_, "layouts": ["C2", "D"], "plan": []}}
 
     def test_rounds_decisions_and_lambda(self):
         packages = [self.package(r, self.round_points(r, c2_tpot=41.0 + r * 0.1)) for r in (1, 2, 3)]
@@ -393,7 +418,223 @@ class AnalyzeTests(unittest.TestCase):
             self.assertIn("lambda*", md.read_text(encoding="utf-8"))
 
 
+class RoundJobTests(unittest.TestCase):
+    """Two round jobs per round: FP8 (A, B0, C8m, A2; C8ms in round 1) and NVFP4 (D, D42, D24), as rounds.jobs."""
+    RATES = PROTOCOL["rate_grids"]["grids"]["A"]["W1"]
+    SPEED = {"A": 1.0, "B0": 1.02, "C8m": 1.3, "D": 1.1, "D42": 0.98, "D24": 1.25, "A2": 1.0, "C8ms": 1.2, "D2": 1.1}
+    # standard goodput on the W1 grid: B0 meets the SLO at every rate (lambda* only a bound), the others cross 0.9
+    GOODPUT = {"A": [1, 1, 0.8, 0.3], "B0": [1, 1, 0.95, 0.92], "C8m": [1, 1, 0.98, 0.5], "D": [1, 1, 0.85, 0.4],
+               "D42": [1, 1, 0.7, 0.2], "D24": [1, 1, 0.97, 0.6], "A2": [1, 1, 0.8, 0.3], "C8ms": [1, 1, 0.9, 0.4],
+               "D2": [1, 1, 0.85, 0.4]}
+
+    def launch(self, round_, phase, layout, tpot):
+        scale = self.SPEED[layout] * (1 + 0.004 * round_)
+        points = open_points(round_, phase, self.RATES, self.GOODPUT[layout],
+                             [100 * scale, 200 * scale, 300 * scale, 380 * scale])
+        if layout in ("A2", "C8ms", "D2"):
+            points = [p for p in points if p["point"] in ("p1", "p2")]
+        return points + [point(round_, phase, "R/isl1024-c1", steady={"tpot_p50": tpot * (1 + 0.003 * round_), "ttft_p50": 400.0})]
+
+    def packages(self, rounds=(1, 2, 3), protocol=PROTOCOL):
+        out = []
+        for round_ in rounds:
+            for job, names in (("fp8", ["A", "B0", "C8m", "A2"] + (["C8ms"] if round_ == 2 else [])),
+                               ("nvfp4", ["D", "D42", "D24"] + (["D2"] if protocol["rounds"]["jobs"]["nvfp4"]["control"] else []))):
+                spec = protocol["rounds"]["jobs"][job]
+                points, plans = [], {}
+                for name in names:
+                    phase = f"slo-{name}"
+                    launch = self.launch(round_, phase, name, {"A": 20.5, "A2": 20.6, "B0": 25.7, "C8m": 44.0, "C8ms": 45.0,
+                                                               "D": 20.2, "D2": 20.3, "D42": 22.2, "D24": 31.2}[name])
+                    points += launch
+                    for p in launch:
+                        plans.setdefault(phase, {}).setdefault("partr" if p["workload"] == "R" else "slo", {"plan": []})["plan"].append(p["name"])
+                    if "realtext" in bs.phase_suites(PROTOCOL, phase, round_):
+                        plans[phase]["realtext"] = {"plan": []}
+                    if "soak" in bs.phase_suites(PROTOCOL, phase, round_):
+                        plans[phase]["soak"] = {"plan": []}
+                record = {"round": round_, "job": job, "reference": spec["reference"], "control": spec["control"],
+                          "layouts": spec["layouts"], "deviation": False, "plan": []}
+                out.append({"source": f"{job}-r{round_}", "rounds": [round_], "points": points, "plans": plans, "parity": {},
+                            "protocol_plan": record})
+        return out
+
+    def test_comparisons_within_each_job_and_across_jobs(self):
+        evidence = bs.analyze(self.packages(), PROTOCOL, resamples=0)
+        self.assertEqual(evidence["valid_rounds"], [1, 2, 3])
+        self.assertEqual(evidence["round_layouts"]["1"], {"fp8": ["B0", "C8m"], "nvfp4": ["D42", "D24"]})
+        info, comparisons = evidence["comparison_info"], evidence["comparisons"]
+        self.assertEqual(list(comparisons), ["slo-B0 vs slo-A", "slo-C8m vs slo-A", "slo-C8ms vs slo-A", "slo-C8ms vs slo-C8m",
+                                             "slo-D42 vs slo-D", "slo-D24 vs slo-D", "slo-D vs slo-A", "slo-D42 vs slo-A",
+                                             "slo-D24 vs slo-A"])
+        self.assertEqual({name: m["kind"] for name, m in info.items() if m["kind"] == "cross-job"},
+                         {n: "cross-job" for n in ("slo-D vs slo-A", "slo-D42 vs slo-A", "slo-D24 vs slo-A")})
+        self.assertEqual({name.split(" vs ")[0] for name, m in info.items() if m["selection"] == "added after screening"},
+                         {"slo-C8m", "slo-C8ms", "slo-D24"})
+        self.assertEqual(info["slo-B0 vs slo-A"]["selection"], "pre-registered")
+        self.assertEqual(comparisons["slo-C8m vs slo-A"]["lambda_star.W1.standard"]["decision"], "better")
+        self.assertEqual(comparisons["slo-C8m vs slo-A"]["R/isl1024-c1.tpot_p50"]["drift_corrected_rounds"], [1, 2, 3])
+        d24 = comparisons["slo-D24 vs slo-D"]["R/isl1024-c1.tpot_p50"]
+        self.assertEqual((d24["drift_corrected_rounds"], d24["decision"]), ([1, 2, 3], "worse"), "D2 corrects D's drift")
+        self.assertEqual(d24["delta_min_source"], "D2 of this metric")
+        self.assertIn("R/isl1024-c1.tpot_p50", evidence["noise"]["nvfp4"])
+        uncontrolled = json.loads(json.dumps(PROTOCOL))
+        uncontrolled["rounds"]["jobs"]["nvfp4"]["control"] = None
+        borrowed = bs.analyze(self.packages(protocol=uncontrolled), uncontrolled, resamples=0)
+        row = borrowed["comparisons"]["slo-D24 vs slo-D"]["R/isl1024-c1.tpot_p50"]
+        self.assertEqual(row["drift_corrected_rounds"], [])
+        self.assertIn("borrowed from the fp8 job", row["delta_min_source"])
+        cross = comparisons["slo-D vs slo-A"]["R/isl1024-c1.tpot_p50"]
+        self.assertEqual(cross["drift_corrected_rounds"], [1, 2, 3], "A's baseline keeps its A2 correction across jobs")
+        self.assertIn("W1/p1.tpot_p90", comparisons["slo-D vs slo-A"], "shared grids keep per-point metrics comparable")
+        text = bs.markdown(evidence)
+        self.assertIn("## slo-D24 vs slo-A (cross-job, added after screening)", text)
+        self.assertIn("## slo-C8m vs slo-A (added after screening)", text)
+        self.assertIn("## slo-B0 vs slo-A\n", text)
+        self.assertIn("Deviation: C8m and D24 run in the rounds", text)
+
+    def test_a_failed_nvfp4_round_leaves_the_fp8_comparisons_alone(self):
+        packages = self.packages()
+        nvfp4 = next(p for p in packages if p["source"] == "nvfp4-r2")
+        nvfp4["points"][0]["valid"] = False
+        evidence = bs.analyze(packages, PROTOCOL, resamples=0)
+        self.assertEqual(evidence["valid_rounds_by_job"], {"fp8": [1, 2, 3], "nvfp4": [1, 3]})
+        self.assertEqual(evidence["valid_rounds"], [1, 3])
+        self.assertFalse(evidence["round_validity"][2]["jobs"]["nvfp4"]["valid"])
+        self.assertTrue(evidence["round_validity"][2]["jobs"]["fp8"]["valid"])
+        self.assertEqual(evidence["comparison_info"]["slo-B0 vs slo-A"]["rounds"], [1, 2, 3])
+        self.assertEqual(evidence["comparison_info"]["slo-D vs slo-A"]["rounds"], [1, 3])
+        self.assertEqual(evidence["comparisons"]["slo-D vs slo-A"]["lambda_star.W1.standard"]["rounds"], [1, 3])
+        twice = packages + [dict(nvfp4, source="nvfp4-r2-again")]
+        problems = bs.analyze(twice, PROTOCOL, resamples=0)["round_validity"][2]["problems"]
+        self.assertIn("round 2 has 2 packages of the nvfp4 job (pass one package per round and job)", problems)
+
+    def test_soak_rates_for_round_three_and_extension_per_job(self):
+        evidence = bs.analyze(self.packages((1, 2)), PROTOCOL, resamples=0)
+        rates = evidence["soak_rates"]["rates"]
+        self.assertEqual(sorted(rates), ["A", "B0", "C8m", "D", "D24", "D42"])
+        lam = [evidence["launch_metrics"][f"round {r} slo-C8m"]["lambda_star.W1.standard"] for r in (1, 2)]
+        self.assertAlmostEqual(rates["C8m"]["rate"], round(0.8 * sum(lam) / 2, 3))
+        self.assertEqual(rates["B0"], {"rate": 0.8, "from": "bound", "rounds": [1, 2]}, "0.8 x the grid's top rate")
+        self.assertEqual(rates["A"]["from"], "lambda*")
+        self.assertTrue(evidence["soak_rates"]["env"].startswith("SOAK_RATES=A="))
+        self.assertEqual(sorted(evidence["extension"]["jobs"]), ["fp8", "nvfp4"])
+        self.assertFalse(evidence["extension"]["evaluated"], "two rounds")
+
+    def test_rates_overrides_and_layout_deviations_are_reported(self):
+        packages = self.packages((1,))
+        packages[0]["plans"]["slo-B0"]["slo"]["rates_override"] = {"W1": [0.5, 0.7]}
+        packages[1]["protocol_plan"] = dict(packages[1]["protocol_plan"], layouts=["D42"], deviation=True)
+        whats = [d["what"] for d in bs.analyze(packages, PROTOCOL, resamples=0)["deviations"]]
+        self.assertIn("SLO_RATES override {'W1': [0.5, 0.7]}", whats)
+        self.assertIn("ROUND_LAYOUTS=D42 differs from the frozen list", whats)
+
+
+class ParityAcceptanceTests(unittest.TestCase):
+    def test_both_jobs_accept_candidates_against_their_control_floor(self):
+        good = {"mean_abs_logprob_diff": 0.006, "top1_agreement": 0.99, "greedy_diverged_before_16": 0}
+        bad = dict(good, mean_abs_logprob_diff=0.05)
+        floor = {"mean_abs_logprob_diff": 0.004, "top1_agreement": 0.99, "greedy_diverged_before_16": 0}
+        plan = lambda job, ref, control, layouts: {"round": 1, "job": job, "reference": ref, "control": control,
+                                                   "layouts": layouts, "deviation": False, "plan": []}
+        packages = [{"source": "fp8", "rounds": [1], "points": [], "protocol_plan": plan("fp8", "A", "A2", ["B0", "C8m"]),
+                     "parity": {"slo-B0": good, "slo-C8m": bad, "slo-A2": floor}},
+                    {"source": "nvfp4", "rounds": [1], "points": [], "protocol_plan": plan("nvfp4", "D", "D2", ["D42", "D24"]),
+                     "parity": {"slo-D42": good, "slo-D24": bad, "slo-D2": floor}}]
+        acceptance = bs.analyze(packages, PROTOCOL, resamples=0)["parity_acceptance"]
+        self.assertEqual({k: v["status"] for k, v in acceptance.items()},
+                         {"round 1 slo-B0": "pass", "round 1 slo-C8m": "fail", "round 1 slo-D42": "pass", "round 1 slo-D24": "fail"})
+
+
+class AccuracyComparisonTests(unittest.TestCase):
+    FIELDS = ["dataset", "key", "correct", "pred", "gold", "finish_reason", "completion_tokens", "error"]
+
+    def result(self, wrong=(), unscored=(), gold=None, failed=None):
+        items = [["kobalt" if i < 700 else "click", f"k{i}", None if i in unscored else i not in wrong, "A",
+                  (gold or {}).get(i, "A"), "stop", 900, None] for i in range(1000)]
+        return {"phase": "slo-A", "item_fields": self.FIELDS, "items": items, "summary": {}, "failed": failed}
+
+    def packages(self, fp8, nvfp4):
+        return [{"source": "fp8-r1", "rounds": [1], "points": [], "accuracy": {"slo-A": fp8}},
+                {"source": "nvfp4-r1", "rounds": [1], "points": [], "accuracy": {"slo-D": nvfp4}}]
+
+    def test_paired_difference_mcnemar_and_non_inferiority(self):
+        fp8 = self.result(wrong=range(0, 40))  # FP8 right on 960
+        nvfp4 = self.result(wrong=list(range(5, 40)) + list(range(300, 310)))  # 5 more right, 10 more wrong: b=10, c=5
+        result = bs.accuracy_comparison(self.packages(fp8, nvfp4), PROTOCOL)
+        pooled = result["tables"]["pooled"]
+        self.assertEqual((pooled["n"], pooled["fp8_only"], pooled["nvfp4_only"]), (1000, 10, 5))
+        self.assertAlmostEqual(pooled["difference"], -0.005)
+        half = 1.959964 * math.sqrt(15 - 25 / 1000) / 1000
+        self.assertAlmostEqual(pooled["ci95"][0], -0.005 - half)
+        self.assertAlmostEqual(pooled["mcnemar_p"], 2 * sum(math.comb(15, i) for i in range(6)) / 2 ** 15)
+        self.assertEqual((pooled["decision"], result["decision"], result["cross_job"]), ("non-inferior", "non-inferior", True))
+        self.assertEqual((result["tables"]["kobalt"]["n"], result["tables"]["click"]["n"], result["expected"]), (700, 300, 1000))
+        worse = self.result(wrong=list(range(0, 40)) + list(range(200, 260)))
+        self.assertEqual(bs.accuracy_comparison(self.packages(fp8, worse), PROTOCOL)["decision"], "inferior")
+        noisy = self.result(wrong=list(range(25, 40)) + list(range(700, 745)))  # b=45, c=25: d=-0.02 +- 0.016
+        self.assertEqual(bs.accuracy_comparison(self.packages(fp8, noisy), PROTOCOL)["decision"], "inconclusive")
+        self.assertEqual(bs.mcnemar_exact(0, 0), 1.0)
+
+    def test_missing_failed_incomplete_and_mismatched_items(self):
+        fp8 = self.result()
+        self.assertEqual(bs.accuracy_comparison(self.packages(fp8, self.result(failed="datasets: OSError")), PROTOCOL)["decision"],
+                         "failed")
+        self.assertEqual(bs.accuracy_comparison(self.packages(fp8, fp8)[:1], PROTOCOL)["decision"], "missing")
+        enough = bs.accuracy_comparison(self.packages(fp8, self.result(unscored=range(10))), PROTOCOL)
+        self.assertEqual((enough["paired"], enough["decision"], enough["coverage"]), (990, "non-inferior", "complete"),
+                         "99% of 1,000 items is enough")
+        partial = bs.accuracy_comparison(self.packages(fp8, self.result(unscored=range(11))), PROTOCOL)
+        self.assertEqual((partial["paired"], partial["decision"], partial["coverage"]), (989, "non-inferior", "partial"))
+        self.assertIn("partial coverage", partial["problems"][0])
+        self.assertIn("non-inferior (partial coverage)", bs.markdown(
+            {**bs.analyze(self.packages(fp8, self.result(unscored=range(11))), PROTOCOL, resamples=0)}))
+        floor = bs.accuracy_comparison(self.packages(fp8, self.result(unscored=range(200))), PROTOCOL)
+        self.assertEqual((floor["paired"], floor["decision"], floor["coverage"]), (800, "non-inferior", "partial"))
+        short = bs.accuracy_comparison(self.packages(fp8, self.result(unscored=range(201))), PROTOCOL)
+        self.assertEqual((short["paired"], short["decision"], short["coverage"]), (799, "incomplete", "incomplete"))
+        mismatch = bs.accuracy_comparison(self.packages(fp8, self.result(gold={1: "B", 2: "C"})), PROTOCOL)
+        self.assertEqual((mismatch["gold_mismatches"], mismatch["paired"], mismatch["decision"]), (2, 998, "non-inferior"))
+        evidence = bs.analyze(self.packages(fp8, fp8), PROTOCOL, resamples=0)
+        self.assertEqual(evidence["accuracy"]["decision"], "non-inferior")
+        self.assertIn("## Accuracy, NVFP4 against FP8 (margin -0.03): non-inferior", bs.markdown(evidence))
+
+
 class PackageTests(unittest.TestCase):
+    def test_package_keeps_accuracy_and_compares_parity_with_the_jobs_reference(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            verify = root / "node0" / "verify"
+            verify.mkdir(parents=True)
+            raw = lambda phase, chosen: {"record_type": "parity", "phase": phase, "long": False,
+                                         "p1": {"d": {"chosen": chosen, "top1": [1, 2]}}, "p2": {"d@0": {"generated": [1, 2, 3]}}}
+            for phase, chosen in (("slo-D", [-1.0, -2.0]), ("slo-D42", [-1.1, -2.0]), ("slo-A", [-1.0, -2.0])):
+                (verify / f"parity-{phase}.json").write_text(json.dumps(raw(phase, chosen)))
+            (root / "node0" / "protocol-plan.json").write_text(json.dumps(
+                {"round": 1, "job": "nvfp4", "reference": "D", "control": None, "layouts": ["D42", "D24"], "plan": []}))
+            (verify / "slo-D.accuracy.json").write_text(json.dumps(
+                {"phase": "slo-D", "item_fields": ["dataset", "key", "correct"], "items": [["kobalt", "k1", True]],
+                 "summary": {"kobalt": {"accuracy": 1.0}}, "pins": {"kobalt": "x"}, "suite_seconds": 3.0}))
+            (verify / "slo-D.slo.json").write_text(json.dumps({"plan": ["W1-p1-r0.6"], "rates_override": {"W1": [0.5]}}))
+            long = lambda phase, generated: {"record_type": "parity", "phase": phase, "long": True, "p1": {},
+                                             "p2": {name: {"generated": generated, "logprobs": [-0.5] * 64}
+                                                    for name in ("long-a", "long-b")}}
+            (verify / "parity-slo-D-long.json").write_text(json.dumps(long("slo-D", list(range(64)))))
+            (verify / "parity-slo-D42-long.json").write_text(json.dumps(long("slo-D42", [9] + list(range(1, 64)))))
+            (verify / "parity-slo-D2-long.json").write_text(json.dumps(long("slo-D2", list(range(64)))))
+            data = bs.package(root, PROTOCOL)
+        self.assertEqual(sorted(data["parity"]), ["slo-A", "slo-D2-long", "slo-D42", "slo-D42-long"],
+                         "parity against the NVFP4 job's reference D")
+        self.assertEqual(data["parity"]["slo-D42-long"]["long_check"]["status"], "suspect", "both documents differ at token 0")
+        self.assertEqual(data["parity"]["slo-D2-long"]["long_check"]["status"], "ok")
+        evidence = bs.analyze([{**data, "rounds": [1], "points": []}], PROTOCOL, resamples=0)
+        self.assertEqual(evidence["long_context"]["round 1 slo-D42"]["status"], "suspect")
+        self.assertIn("## Long-context greedy check (P3", bs.markdown(evidence))
+        self.assertAlmostEqual(data["parity"]["slo-D42"]["mean_abs_logprob_diff"], 0.05)
+        self.assertEqual(data["accuracy"]["slo-D"]["items"], [["kobalt", "k1", True]])
+        self.assertEqual(data["plans"]["slo-D"]["slo"]["rates_override"], {"W1": [0.5]})
+        self.assertEqual(data["protocol_plan"]["job"], "nvfp4")
+
     def test_package_from_job_outputs(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -795,15 +1036,14 @@ class SelectedRoundAnalysisTests(unittest.TestCase):
             for p in points:
                 plans.setdefault(p["phase"], {}).setdefault("partr" if p["workload"] == "R" else "slo", {"plan": []})["plan"].append(p["name"])
             for phase in ("slo-A", "slo-C4", "slo-D"):
-                if phase != "slo-D":
-                    plans[phase]["realtext"] = {"plan": []}
-                if round_ == 3:
-                    plans[phase]["soak"] = {"plan": []}
+                for suite in ("realtext", "soak"):
+                    if suite in bs.phase_suites(PROTOCOL, phase, round_):
+                        plans[phase][suite] = {"plan": []}
             packages.append({"rounds": [round_], "points": points, "plans": plans, "parity": {},
                              "protocol_plan": {"round": round_, "layouts": ["C4", "D"], "plan": []}})
         evidence = bs.analyze(packages, PROTOCOL, resamples=0)
         self.assertEqual(evidence["valid_rounds"], [1, 2, 3])
-        self.assertEqual(evidence["round_layouts"], {"1": ["C4", "D"], "2": ["C4", "D"], "3": ["C4", "D"]})
+        self.assertEqual(evidence["round_layouts"], {str(r): {"fp8": ["C4", "D"]} for r in (1, 2, 3)})
         self.assertIn("slo-C4 vs slo-A", evidence["comparisons"])
         self.assertIn("slo-C4s vs slo-C4", evidence["comparisons"])
         self.assertNotIn("slo-C2 vs slo-A", evidence["comparisons"])

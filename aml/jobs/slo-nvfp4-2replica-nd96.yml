@@ -3,12 +3,15 @@ type: command
 experiment_name: axk2-slo-protocol
 display_name: slo-nvfp4-2replica-2xND96amsr-A100
 description: >-
-  D x 2 scaling check (docs/BENCHMARK_PROTOCOL.md): the official skt/A.X-K2-NVFP4 with the SM80 Marlin port.
-  dx1-D serves D (TP8) on node0 alone; dx2-D serves one D per node, both started with the protocol's flags,
-  behind lb_proxy.py on node0 (least outstanding requests, streamed responses). Both run Poisson W1 and W2
-  grids with goodput; pass when lambda*(dx2) >= 1.9 x lambda*(dx1) for W1 and W2 at the standard SLO.
-  NVFP4 quality equivalence is a separate prerequisite. The scripts are downloaded from the pinned commit of
-  this public repository and checked file by file.
+  D x 2 scaling check (docs/BENCHMARK_PROTOCOL.md section 12), once and first, before round 1, with round-1
+  seeds: the official skt/A.X-K2-NVFP4 with the SM80 Marlin port. dx1-D serves D (TP8) on node0 alone on D's
+  frozen rate grid, which also shows before round 1 whether that grid brackets D's W1 and W2 lambda*; dx2-D
+  serves one D per node, both started with the protocol's flags, behind lb_proxy.py on node0 (least outstanding
+  requests, streamed responses) on twice that grid, so each replica sees dx1-D's per-server load. Both run
+  Poisson W1 and W2 with goodput; pass when lambda*(dx2) >= 1.9 x lambda*(dx1) for W1 and W2 at the standard SLO.
+  It never runs next to the FP8 round job (four nodes). Expected about 2.8 h (setup 0.2 h, dx1-D and dx2-D about
+  1.3 h each; estimate); timeout 6 h. The scripts are downloaded from the pinned commit of this public repository
+  and checked file by file.
 compute: azureml:a100-nd96-lp
 environment:
   image: docker.io/vllm/vllm-openai:v0.23.0-cu129

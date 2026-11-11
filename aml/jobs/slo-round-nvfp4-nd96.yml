@@ -1,0 +1,52 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+experiment_name: axk2-slo-protocol
+display_name: slo-round-nvfp4-1xND96amsr-A100
+description: >-
+  One round of the pre-registered serving protocol, NVFP4 round job (docs/BENCHMARK_PROTOCOL.md section 7,
+  aml/src/bench/slo_protocol.json rounds.jobs.nvfp4) on one 8xA100-80GB node with the official
+  skt/A.X-K2-NVFP4 (SM80 Marlin port); set ROUND at submission (1 to 3; 4 and 5 only when the extension rule
+  fires). PHASE_PLAN slo-round-nvfp4 runs D (TP8, the NVFP4 reference), then D42 (TP4 x PP2, the pre-registered
+  NVFP4 choice) and D24 (DP2 x TP4 + EP8, added after the screening) in the round's order, then D2 (D relaunched)
+  and, in round 2, cap-D, cap-D42 and cap-D24. D, D42 and D24 run parity against D, Part R, closed-loop S1,
+  Poisson W1 and W2 on the frozen rate grids with goodput, real-text W1 and last the 32K greedy check (P3); D2
+  runs parity, Part R, two W1 rates and P3. In round 1 D also answers the 1,000-item accuracy subset before P3
+  (paired with A of the FP8 round job); in round 3 D, D42 and D24 run a 45-minute soak (pass SOAK_RATES from
+  bench_stats.py analyze). It runs next to the FP8 round job (slo-round-fp8-nd96.yml) on a third node, so no
+  NVFP4 layout leaves a node idle. Results reach the job record after every phase (slo.package). Expected about
+  9.7 h in round 1, 7.7 h in round 2 and 9.6 h in round 3 (estimate); timeout 12 h. The scripts are downloaded
+  from the pinned commit of this public repository and checked file by file.
+compute: azureml:a100-nd96-lp
+environment:
+  image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+identity:
+  type: user_identity
+resources:
+  instance_count: 1
+  shm_size: 256g
+distribution:
+  type: pytorch
+  process_count_per_instance: 1
+environment_variables:
+  AXK2_SRC_GIT: "__AXK2_SRC_GIT__"
+  AXK2_SRC_MANIFEST: "__AXK2_SRC_MANIFEST__"
+  FULL_REPO: skt/A.X-K2-NVFP4
+  NVFP4_SM80_PORT: "1"
+  PHASE_PLAN: "slo-round-nvfp4"
+  ROUND: "1"
+  ROUND_LAYOUTS: "D42,D24"
+  FULL_HEALTH_TIMEOUT: "1800"
+  DOWNLOAD_TIMEOUT: "3600"
+  RUN_KERNEL_TESTS: "1"
+  TP: "8"
+  PP: "1"
+command: >-
+  mkdir -p /tmp/axk2src && for try in 1 2 3 4 5 6; do python3 -c "import hashlib, os, sys, urllib.request as u;
+  repo, sha = os.environ['AXK2_SRC_GIT'].split('@'); items = [i.split(':') for i in os.environ['AXK2_SRC_MANIFEST'].split(',')];
+  data = dict((n, u.urlopen('https://raw.githubusercontent.com/' + repo + '/' + sha + '/aml/src/' + n, timeout=120).read()) for n, d in items);
+  bad = [n for n, d in items if hashlib.sha256(data[n]).hexdigest() != d]; bad and sys.exit('source digest mismatch: ' + ' '.join(bad));
+  [os.makedirs(os.path.dirname('/tmp/axk2src/' + n), exist_ok=True) or open('/tmp/axk2src/' + n, 'wb').write(data[n]) for n, d in items]"
+  && break; sleep 20; done && test -f /tmp/axk2src/entry.sh && test -f /tmp/axk2src/bench/protocol.sh &&
+  bash /tmp/axk2src/entry.sh none hf:9e2e804e80f8d1b3afba5d7938173cec1ed46b49
+limits:
+  timeout: 43200
