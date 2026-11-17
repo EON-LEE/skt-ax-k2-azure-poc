@@ -781,7 +781,7 @@ class PublicFileTests(unittest.TestCase):
 
     def test_protocol_doc_tables_and_values(self):
         doc = (ROOT / "docs" / "BENCHMARK_PROTOCOL.md").read_text(encoding="utf-8")
-        self.assertIn("1라운드 실행(2026-11-11~12)", doc)
+        self.assertIn("라운드 완료(2026-11-17)", doc)
         table = []
         for line in doc.splitlines() + [""]:
             if line.startswith("|"):

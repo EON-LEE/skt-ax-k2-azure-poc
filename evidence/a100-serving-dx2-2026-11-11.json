@@ -1,0 +1,427 @@
+{
+ "schema": "axk2-slo-evidence/2",
+ "protocol_status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds have not run. Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
+ "rounds": [
+  1
+ ],
+ "round_jobs": {
+  "1": {}
+ },
+ "round_layouts": {
+  "1": {}
+ },
+ "selection": {
+  "date": "2026-11-10",
+  "pre_registered": [
+   "B0",
+   "D42"
+  ],
+  "added_after_screening": [
+   "C8m",
+   "D24"
+  ],
+  "label": "added after screening",
+  "rule": "screen.selection chose B0 (FP8) and D42 (NVFP4); the D x 2 decision passed",
+  "decision": "After the screening report (docs/report/SCREENING_2026-11-10.md) the user chose 'A + B0 + D42 + C8 + D24' (all throughput candidates, about 76 node-hours, about $980); C8 is the mp-multinode layout C8m because the Ray C8 cannot start"
+ },
+ "deviations": [
+  {
+   "date": "2026-11-10",
+   "what": "C8m and D24 run in the rounds although the pre-registered selection rule (screen.selection) chose only B0 and D42",
+   "why": "the user's decision after the screening report: A + B0 + D42 + C8 + D24, all throughput candidates (C8 = the mp-multinode C8m; the Ray C8 cannot start)",
+   "effect": "their comparisons are labelled 'added after screening' in every analyze and report output (rounds.selection)"
+  }
+ ],
+ "round_validity": {
+  "1": {
+   "valid": false,
+   "problems": [
+    "no round job reported a plan (protocol-plan.json) for this round"
+   ],
+   "jobs": {}
+  }
+ },
+ "valid_rounds": [],
+ "valid_rounds_by_job": {},
+ "noise": {},
+ "a2_noise": {},
+ "pooled_delta_min_log": 0.04879016416943205,
+ "comparisons": {},
+ "comparison_info": {},
+ "extension": {
+  "rounds_valid": 0,
+  "recommended": false,
+  "evaluated": false,
+  "jobs": {},
+  "reasons": []
+ },
+ "lambda_star": {
+  "round 1 dx1-D": {
+   "W1.standard": {
+    "value": 0.835179332831703,
+    "bracketed": true,
+    "between": [
+     0.78,
+     1.0
+    ],
+    "output_tok_s": 412.77662904439427,
+    "total_tok_s": 1259.5173486330575,
+    "monotonic": true
+   },
+   "W1.strict": {
+    "value": 0.49724409448818896,
+    "bracketed": true,
+    "between": [
+     0.45,
+     0.6
+    ],
+    "output_tok_s": 249.0877086614173,
+    "total_tok_s": 774.9560551181103,
+    "monotonic": true
+   },
+   "W2.standard": {
+    "value": 0.16603174603174597,
+    "bracketed": true,
+    "between": [
+     0.11,
+     0.18
+    ],
+    "output_tok_s": 79.30844897959182,
+    "total_tok_s": 1379.3163764172334,
+    "monotonic": false
+   },
+   "W2.strict": {
+    "value": null,
+    "bracketed": false,
+    "high": 0.07,
+    "bound": "below the grid",
+    "reason": "below the grid (lambda* < 0.07): no rate meets the threshold, the grid starts too high"
+   }
+  },
+  "round 1 dx2-D": {
+   "W1.standard": {
+    "value": 1.6499243817698754,
+    "bracketed": true,
+    "between": [
+     1.56,
+     2.0
+    ],
+    "output_tok_s": 827.0801410177805,
+    "total_tok_s": 2487.501894543225,
+    "monotonic": true
+   },
+   "W1.strict": {
+    "value": 1.0647446457990115,
+    "bracketed": true,
+    "between": [
+     0.9,
+     1.2
+    ],
+    "output_tok_s": 559.8101136738055,
+    "total_tok_s": 1677.4156309719933,
+    "monotonic": true
+   },
+   "W2.standard": {
+    "value": 0.27548949663099487,
+    "bracketed": true,
+    "between": [
+     0.22,
+     0.36
+    ],
+    "output_tok_s": 145.86031351565597,
+    "total_tok_s": 2474.2647047166074,
+    "monotonic": true
+   },
+   "W2.strict": {
+    "value": 0.23073521670468503,
+    "bracketed": true,
+    "between": [
+     0.22,
+     0.36
+    ],
+    "output_tok_s": 127.56540322863661,
+    "total_tok_s": 2141.718027724162,
+    "monotonic": false
+   }
+  }
+ },
+ "next_grid": {
+  "W1": null,
+  "W2": null
+ },
+ "parity": {},
+ "parity_acceptance": {},
+ "long_context": {},
+ "soak": {},
+ "soak_rates": {
+  "rule": "SOAK_RATES=<rates key>=<req/s>,...: 0.8 x the mean lambda*(W1, standard SLO) of each layout over the valid rounds 1 and 2 of its job, printed by bench_stats.py analyze (soak_rates); a lambda* known only as a bound uses 0.8 x that bound",
+  "rates": {},
+  "env": "SOAK_RATES="
+ },
+ "accuracy": {
+  "margin": -0.03,
+  "rule": {
+   "non-inferior": "the lower bound of the interval is above the margin",
+   "inferior": "the upper bound is below the margin",
+   "inconclusive": "otherwise"
+  },
+  "primary": "pooled over both datasets (1,000 items); each dataset alone is secondary",
+  "servers": {},
+  "decision": "missing",
+  "problems": [
+   "no accuracy result of slo-A",
+   "no accuracy result of slo-D"
+  ]
+ },
+ "dx2_scaling": {
+  "round 1 W1": {
+   "lambda_dx1": 0.835179332831703,
+   "lambda_dx2": 1.6499243817698754,
+   "ratio": 1.9755330584818862,
+   "passed": true
+  },
+  "round 1 W2": {
+   "lambda_dx1": 0.16603174603174597,
+   "lambda_dx2": 0.27548949663099487,
+   "ratio": 1.6592579625002564,
+   "passed": false
+  }
+ },
+ "diagnostics": [
+  {
+   "name": "A1: indexer grid scales with max_model_len",
+   "x": "diag-A",
+   "base": "diag-A-maxlen",
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "A8: round-robin expert placement",
+   "x": "diag-C1rr",
+   "base": "diag-C1",
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "EP penalty with round-robin placement",
+   "x": "diag-C1rr",
+   "base": "diag-A",
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  },
+  {
+   "name": "DCP: KV capacity and speed of TP16 with DCP 2",
+   "x": "diag-B0dcp",
+   "base": "diag-B0",
+   "ratios": {},
+   "note": "one launch each: an indication, not a statistically established difference"
+  }
+ ],
+ "bootstrap_within_launch": {},
+ "invalid_attempts": [],
+ "launch_metrics": {
+  "round 1 dx1-D": {
+   "W1/p0.ttft_p50": 395.992,
+   "W1/p0.ttft_p90": 653.227,
+   "W1/p0.tpot_p50": 39.155,
+   "W1/p0.tpot_p90": 45.807,
+   "W1/p0.e2e_p50": 20494.106,
+   "W1/p0.e2e_p90": 23941.469,
+   "W1/p0.itl_p50": 36.459,
+   "W1/p0.output_tok_s": 228.397,
+   "W1/p0.goodput.standard": 1.0,
+   "W1/p0.goodput.strict": 1.0,
+   "W1/p1.ttft_p50": 408.978,
+   "W1/p1.ttft_p90": 667.128,
+   "W1/p1.tpot_p50": 47.627,
+   "W1/p1.tpot_p90": 58.645,
+   "W1/p1.e2e_p50": 24841.489,
+   "W1/p1.e2e_p90": 30482.371,
+   "W1/p1.itl_p50": 37.524,
+   "W1/p1.output_tok_s": 294.09,
+   "W1/p1.goodput.standard": 1.0,
+   "W1/p1.goodput.strict": 0.6825,
+   "W1/p2.ttft_p50": 436.99,
+   "W1/p2.ttft_p90": 729.812,
+   "W1/p2.tpot_p50": 57.842,
+   "W1/p2.tpot_p90": 78.894,
+   "W1/p2.e2e_p50": 30311.892,
+   "W1/p2.e2e_p90": 40949.065,
+   "W1/p2.itl_p50": 41.685,
+   "W1/p2.output_tok_s": 388.66,
+   "W1/p2.goodput.standard": 1.0,
+   "W1/p2.goodput.strict": 0.163,
+   "W1/p3.ttft_p50": 499.176,
+   "W1/p3.ttft_p90": 957.819,
+   "W1/p3.tpot_p50": 98.87,
+   "W1/p3.tpot_p90": 106.769,
+   "W1/p3.e2e_p50": 51105.53,
+   "W1/p3.e2e_p90": 55291.964,
+   "W1/p3.itl_p50": 72.988,
+   "W1/p3.output_tok_s": 484.813,
+   "W1/p3.goodput.standard": 0.6013,
+   "W1/p3.goodput.strict": 0.0,
+   "W2/p0.ttft_p50": 2589.706,
+   "W2/p0.ttft_p90": 3791.342,
+   "W2/p0.tpot_p50": 27.196,
+   "W2/p0.tpot_p90": 33.905,
+   "W2/p0.e2e_p50": 16471.416,
+   "W2/p0.e2e_p90": 23124.386,
+   "W2/p0.itl_p50": 22.402,
+   "W2/p0.output_tok_s": 30.743,
+   "W2/p0.goodput.standard": 0.9474,
+   "W2/p0.goodput.strict": 0.8421,
+   "W2/p1.ttft_p50": 2598.255,
+   "W2/p1.ttft_p90": 4771.05,
+   "W2/p1.tpot_p50": 33.002,
+   "W2/p1.tpot_p90": 50.533,
+   "W2/p1.e2e_p50": 19897.842,
+   "W2/p1.e2e_p90": 29050.774,
+   "W2/p1.itl_p50": 25.492,
+   "W2/p1.output_tok_s": 52.747,
+   "W2/p1.goodput.standard": 0.9706,
+   "W2/p1.goodput.strict": 0.6176,
+   "W2/p2.ttft_p50": 2625.242,
+   "W2/p2.ttft_p90": 6471.161,
+   "W2/p2.tpot_p50": 50.397,
+   "W2/p2.tpot_p90": 75.628,
+   "W2/p2.e2e_p50": 29387.61,
+   "W2/p2.e2e_p90": 42039.924,
+   "W2/p2.itl_p50": 31.005,
+   "W2/p2.output_tok_s": 85.93,
+   "W2/p2.goodput.standard": 0.8824,
+   "W2/p2.goodput.strict": 0.3529,
+   "W2/p3.ttft_p50": 28754.616,
+   "W2/p3.ttft_p90": 63335.342,
+   "W2/p3.tpot_p50": 180.788,
+   "W2/p3.tpot_p90": 190.509,
+   "W2/p3.e2e_p50": 109693.559,
+   "W2/p3.e2e_p90": 143087.698,
+   "W2/p3.itl_p50": 64.79,
+   "W2/p3.output_tok_s": 134.39,
+   "W2/p3.goodput.standard": 0.0,
+   "W2/p3.goodput.strict": 0.0,
+   "lambda_star.W1.standard": 0.835179332831703,
+   "output_tok_s_at_lambda.W1.standard": 412.77662904439427,
+   "cost_per_m_output.W1.standard.on_demand": 27.564006722275195,
+   "cost_per_m_output.W1.standard.spot": 8.674317545169123,
+   "lambda_star.W1.strict": 0.49724409448818896,
+   "output_tok_s_at_lambda.W1.strict": 249.0877086614173,
+   "cost_per_m_output.W1.strict.on_demand": 45.677796945185634,
+   "cost_per_m_output.W1.strict.spot": 14.374677798423898,
+   "lambda_star.W2.standard": 0.16603174603174597,
+   "output_tok_s_at_lambda.W2.standard": 79.30844897959182,
+   "cost_per_m_output.W2.standard.on_demand": 143.46236654691842,
+   "cost_per_m_output.W2.standard.spot": 45.1472144724067
+  },
+  "round 1 dx2-D": {
+   "W1/p0.ttft_p50": 392.549,
+   "W1/p0.ttft_p90": 415.567,
+   "W1/p0.tpot_p50": 39.453,
+   "W1/p0.tpot_p90": 43.908,
+   "W1/p0.e2e_p50": 20551.056,
+   "W1/p0.e2e_p90": 22921.364,
+   "W1/p0.itl_p50": 37.179,
+   "W1/p0.output_tok_s": 454.077,
+   "W1/p0.goodput.standard": 1.0,
+   "W1/p0.goodput.strict": 1.0,
+   "W1/p1.ttft_p50": 405.95,
+   "W1/p1.ttft_p90": 430.804,
+   "W1/p1.tpot_p50": 45.92,
+   "W1/p1.tpot_p90": 53.954,
+   "W1/p1.e2e_p50": 23933.799,
+   "W1/p1.e2e_p90": 27980.843,
+   "W1/p1.itl_p50": 37.327,
+   "W1/p1.output_tok_s": 646.617,
+   "W1/p1.goodput.standard": 1.0,
+   "W1/p1.goodput.strict": 0.8179,
+   "W1/p2.ttft_p50": 431.685,
+   "W1/p2.ttft_p90": 653.517,
+   "W1/p2.tpot_p50": 64.353,
+   "W1/p2.tpot_p90": 79.375,
+   "W1/p2.e2e_p50": 33325.096,
+   "W1/p2.e2e_p90": 41020.603,
+   "W1/p2.itl_p50": 58.541,
+   "W1/p2.output_tok_s": 780.41,
+   "W1/p2.goodput.standard": 1.0,
+   "W1/p2.goodput.strict": 0.0175,
+   "W1/p3.ttft_p50": 486.258,
+   "W1/p3.ttft_p90": 740.276,
+   "W1/p3.tpot_p50": 99.557,
+   "W1/p3.tpot_p90": 105.126,
+   "W1/p3.e2e_p50": 51380.93,
+   "W1/p3.e2e_p90": 54248.583,
+   "W1/p3.itl_p50": 72.519,
+   "W1/p3.output_tok_s": 1008.767,
+   "W1/p3.goodput.standard": 0.5107,
+   "W1/p3.goodput.strict": 0.0,
+   "W2/p0.ttft_p50": 2481.342,
+   "W2/p0.ttft_p90": 2512.86,
+   "W2/p0.tpot_p50": 26.636,
+   "W2/p0.tpot_p90": 41.374,
+   "W2/p0.e2e_p50": 16095.668,
+   "W2/p0.e2e_p90": 24280.273,
+   "W2/p0.itl_p50": 22.428,
+   "W2/p0.output_tok_s": 80.62,
+   "W2/p0.goodput.standard": 1.0,
+   "W2/p0.goodput.strict": 0.913,
+   "W2/p1.ttft_p50": 2490.589,
+   "W2/p1.ttft_p90": 2523.493,
+   "W2/p1.tpot_p50": 33.259,
+   "W2/p1.tpot_p90": 46.084,
+   "W2/p1.e2e_p50": 19562.557,
+   "W2/p1.e2e_p90": 25972.488,
+   "W2/p1.itl_p50": 25.491,
+   "W2/p1.output_tok_s": 123.177,
+   "W2/p1.goodput.standard": 1.0,
+   "W2/p1.goodput.strict": 0.9437,
+   "W2/p2.ttft_p50": 2548.928,
+   "W2/p2.ttft_p90": 6256.022,
+   "W2/p2.tpot_p50": 47.89,
+   "W2/p2.tpot_p90": 105.301,
+   "W2/p2.e2e_p50": 27040.176,
+   "W2/p2.e2e_p90": 56441.696,
+   "W2/p2.itl_p50": 31.042,
+   "W2/p2.output_tok_s": 180.407,
+   "W2/p2.goodput.standard": 0.7477,
+   "W2/p2.goodput.strict": 0.3738,
+   "W2/p3.ttft_p50": 21119.368,
+   "W2/p3.ttft_p90": 35674.739,
+   "W2/p3.tpot_p50": 183.955,
+   "W2/p3.tpot_p90": 191.925,
+   "W2/p3.e2e_p50": 108885.405,
+   "W2/p3.e2e_p90": 123222.657,
+   "W2/p3.itl_p50": 64.972,
+   "W2/p3.output_tok_s": 281.88,
+   "W2/p3.goodput.standard": 0.0,
+   "W2/p3.goodput.strict": 0.0,
+   "lambda_star.W1.standard": 1.6499243817698754,
+   "output_tok_s_at_lambda.W1.standard": 827.0801410177805,
+   "cost_per_m_output.W1.standard.on_demand": 27.513120466842835,
+   "cost_per_m_output.W1.standard.spot": 8.658303779726664,
+   "lambda_star.W1.strict": 1.0647446457990115,
+   "output_tok_s_at_lambda.W1.strict": 559.8101136738055,
+   "cost_per_m_output.W1.strict.on_demand": 40.648703908223666,
+   "cost_per_m_output.W1.strict.spot": 12.79203597111824,
+   "lambda_star.W2.standard": 0.27548949663099487,
+   "output_tok_s_at_lambda.W2.standard": 145.86031351565597,
+   "cost_per_m_output.W2.standard.on_demand": 156.00923244356719,
+   "cost_per_m_output.W2.standard.spot": 49.09567886224563,
+   "lambda_star.W2.strict": 0.23073521670468503,
+   "output_tok_s_at_lambda.W2.strict": 127.56540322863661,
+   "cost_per_m_output.W2.strict.on_demand": 178.3834408046402,
+   "cost_per_m_output.W2.strict.spot": 56.136781053999314
+  }
+ },
+ "prices_usd_per_node_hour": {
+  "region": "uksouth, Linux, Standard_ND96amsr_A100_v4 (Azure retail prices as recorded in evidence/a100-nvfp4-single-node.json)",
+  "on_demand": 40.96,
+  "spot": 12.89,
+  "note": "Low-priority capacity has been billed at the Spot rate since 2026-03-31; the older 8.19 low-priority rate no longer applies. Refresh every price before publishing.",
+  "utilization_scenarios": [
+   1.0,
+   0.5
+  ]
+ },
+ "slo_assumption": "ASSUMPTION: agree these tiers (or the customer's own) before round 1."
+}
