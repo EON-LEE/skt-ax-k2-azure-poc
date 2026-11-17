@@ -1,6 +1,6 @@
 {
  "schema": "axk2-slo-evidence/2",
- "protocol_status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. Round 1 ran at the frozen commit c4b22ca (the D x 2 job first, then the two round-1 jobs on 2026-11-11); its W1real points failed for a missing pandas (deviations), and rounds 2 and 3 run at the re-frozen commit that installs it. Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
+ "protocol_status": "Pre-registration. The screening ran on GPUs (main 5dc653b; follow-ups: mp-multinode C4m, C8m, C16m at 6fe428d; PD retries at 2d104e4, b7760b0 and 50d51d9); results are in docs/report/SCREENING_2026-11-10.md. The rounds ran from 2026-11-11 to 2026-11-17: the D x 2 job and round 1 at the frozen commit c4b22ca, rounds 2 and 3 at the re-frozen commit a8974fa that installs pandas for W1real (round 1 lost W1real; deviations). Every round was valid in both round jobs; results are in docs/report/ROUNDS_2026-11-17.md. The extension rule recommended rounds 4 and 5 for both jobs; they did not run: on 2026-11-17 the user closed the rounds at round 3 (deviations). Round layouts (2026-11-10): A + B0 + D42 (the pre-registered selection) + C8m + D24 (added after the screening by the user's decision; deviations), in an FP8 and an NVFP4 round job per round (rounds.jobs); on 2026-11-11 the user chose the reinforced plan (accuracy on 1,000 items, the D2 control, W1real for the NVFP4 layouts; budget.user_budget). Before round 1, freeze aml/src/bench/ (this file, slo_suites.py, accuracy.py, protocol.sh, bench_stats.py, lb_proxy.py, node_tools.py, nixl_preflight.py) and docs/BENCHMARK_PROTOCOL.md in one commit; publish every run, including invalid and aborted runs.",
  "rounds": [
   1,
   2,
@@ -150,6 +150,12 @@
    "what": "The early-divergence parity check (at most 2 of 32 greedy prompts differing before token 16) is reported as uninformative when the control itself fails it (parity.acceptance.uninformative)",
    "why": "in round 1 the relaunch controls, identical in configuration to their references, diverged early on 9 (A2 vs A) and 8 (D2 vs D) of 32 prompts: run-to-run nondeterminism of batched FP8/NVFP4 MoE inference flips near-tied tokens, so the absolute limit was miscalibrated",
    "effect": "the parity status rests on the two floor-relative checks (mean |delta logprob|, top-1 agreement); the analysis keeps the pre-registered status and both counts. Decided after the round-1 parity and before the parity of rounds 2 and 3"
+  },
+  {
+   "date": "2026-11-17",
+   "what": "Rounds 4 and 5 did not run although the extension rule (decision_rules.extend) recommended them for both round jobs",
+   "why": "the user's decision after round 3: the extension rounds were outside the approved budget (about 22 node-hours, about $280 at the Spot meter per round, estimate), and they were expected to narrow mainly the W1 intervals while most W2 intervals stay wide (estimate)",
+   "effect": "every interval and decision comes from rounds 1-3; analyze still reports the extension recommendation and its reasons"
   }
  ],
  "round_validity": {
