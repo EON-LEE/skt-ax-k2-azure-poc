@@ -1,0 +1,1269 @@
+{
+ "schema": "axk2-pack-round-facts/1",
+ "jobs": [
+  {
+   "label": "dx2",
+   "status": "Completed",
+   "nodes": 2,
+   "start_date": "2026-11-11",
+   "run_hours": 2.635,
+   "node_hours": 5.27,
+   "phases": [
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 7.5
+    },
+    {
+     "phase": "dx1-D",
+     "status": "passed",
+     "minutes": 71.2
+    },
+    {
+     "phase": "dx2-D",
+     "status": "passed",
+     "minutes": 67.9
+    }
+   ],
+   "kernel_tests": null,
+   "serving_phases": {
+    "dx1-D": {
+     "seconds_to_healthy": 432,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      233152
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "dx2-D": {
+     "seconds_to_healthy": 241,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      244416
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    }
+   },
+   "hosts_sha256": {
+    "node0": "1ca64af6b3de",
+    "node1": "8fc81b7279c7"
+   }
+  },
+  {
+   "label": "round1-fp8",
+   "status": "Completed",
+   "nodes": 2,
+   "start_date": "2026-11-11",
+   "run_hours": 9.636,
+   "node_hours": 19.27,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 1.9
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 8.8
+    },
+    {
+     "phase": "slo-A",
+     "status": "passed",
+     "minutes": 286.3
+    },
+    {
+     "phase": "slo-B0",
+     "status": "passed",
+     "minutes": 109.6
+    },
+    {
+     "phase": "slo-C8m",
+     "status": "passed",
+     "minutes": 106.9
+    },
+    {
+     "phase": "slo-A2",
+     "status": "passed",
+     "minutes": 46.8
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 111.89s (0:01:51)"
+   ],
+   "serving_phases": {
+    "slo-A": {
+     "seconds_to_healthy": 272,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      663104
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "slo-B0": {
+     "seconds_to_healthy": 312,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      292288
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "slo-C8m": {
+     "seconds_to_healthy": 350,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      149888,
+      149888,
+      149888,
+      149888
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 16,
+       "strategy": "linear",
+       "local_experts": 16,
+       "global_experts": 256
+      }
+     ]
+    },
+    "slo-A2": {
+     "seconds_to_healthy": 201,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      685440
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    }
+   },
+   "hosts_sha256": {
+    "node0": "63bba5238021",
+    "node1": "9dbe4c59cc11"
+   }
+  },
+  {
+   "label": "round1-nvfp4",
+   "status": "Completed",
+   "nodes": 1,
+   "start_date": "2026-11-11",
+   "run_hours": 9.637,
+   "node_hours": 9.64,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 2.0
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 8.8
+    },
+    {
+     "phase": "slo-D",
+     "status": "passed",
+     "minutes": 285.5
+    },
+    {
+     "phase": "slo-D42",
+     "status": "passed",
+     "minutes": 111.8
+    },
+    {
+     "phase": "slo-D24",
+     "status": "passed",
+     "minutes": 108.6
+    },
+    {
+     "phase": "slo-D2",
+     "status": "passed",
+     "minutes": 48.9
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 117.32s (0:01:57)"
+   ],
+   "serving_phases": {
+    "slo-D": {
+     "seconds_to_healthy": 433,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      233152
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "slo-D42": {
+     "seconds_to_healthy": 282,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      515648
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "slo-D24": {
+     "seconds_to_healthy": 302,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      137728,
+      137728
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 8,
+       "strategy": "linear",
+       "local_experts": 32,
+       "global_experts": 256
+      }
+     ]
+    },
+    "slo-D2": {
+     "seconds_to_healthy": 241,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      244416
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    }
+   },
+   "hosts_sha256": {
+    "node0": "64d454b08b13"
+   }
+  },
+  {
+   "label": "round2-fp8",
+   "status": "Completed",
+   "nodes": 2,
+   "start_date": "2026-11-11",
+   "run_hours": 7.717,
+   "node_hours": 15.43,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 1.9
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 22.1
+    },
+    {
+     "phase": "slo-A",
+     "status": "passed",
+     "minutes": 108.9
+    },
+    {
+     "phase": "slo-C8m",
+     "status": "passed",
+     "minutes": 115.8
+    },
+    {
+     "phase": "slo-B0",
+     "status": "passed",
+     "minutes": 111.5
+    },
+    {
+     "phase": "slo-C8ms",
+     "status": "passed",
+     "minutes": 25.3
+    },
+    {
+     "phase": "slo-A2",
+     "status": "passed",
+     "minutes": 37.5
+    },
+    {
+     "phase": "cap-A",
+     "status": "passed",
+     "minutes": 3.6
+    },
+    {
+     "phase": "cap-B0",
+     "status": "passed",
+     "minutes": 4.9
+    },
+    {
+     "phase": "cap-C8m",
+     "status": "passed",
+     "minutes": 6.1
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 110.13s (0:01:50)"
+   ],
+   "serving_phases": {
+    "slo-A": {
+     "seconds_to_healthy": 271,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      663104
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": true
+     }
+    },
+    "slo-C8m": {
+     "seconds_to_healthy": 359,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      149888,
+      149888,
+      149888,
+      149888
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 16,
+       "strategy": "linear",
+       "local_experts": 16,
+       "global_experts": 256
+      }
+     ],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-B0": {
+     "seconds_to_healthy": 292,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      292288
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-C8ms": {
+     "seconds_to_healthy": 247,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      213504,
+      213504,
+      213504,
+      213504
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 16,
+       "strategy": "linear",
+       "local_experts": 16,
+       "global_experts": 256
+      }
+     ]
+    },
+    "slo-A2": {
+     "seconds_to_healthy": 201,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      685440
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "cap-A": {
+     "seconds_to_healthy": 191,
+     "nccl": "ib",
+     "served_max_model_len": 262144,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      659776
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    },
+    "cap-B0": {
+     "seconds_to_healthy": 262,
+     "nccl": "ib",
+     "served_max_model_len": 262144,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      292288
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    },
+    "cap-C8m": {
+     "seconds_to_healthy": 329,
+     "nccl": "ib",
+     "served_max_model_len": 149376,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      149376,
+      149376,
+      149376,
+      149376
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 16,
+       "strategy": "linear",
+       "local_experts": 16,
+       "global_experts": 256
+      }
+     ],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    }
+   },
+   "hosts_sha256": {
+    "node0": "6c382970a49a",
+    "node1": "bcdc0d354950"
+   }
+  },
+  {
+   "label": "round2-nvfp4",
+   "status": "Completed",
+   "nodes": 1,
+   "start_date": "2026-11-11",
+   "run_hours": 6.968,
+   "node_hours": 6.97,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 2.0
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 9.4
+    },
+    {
+     "phase": "slo-D",
+     "status": "passed",
+     "minutes": 111.7
+    },
+    {
+     "phase": "slo-D24",
+     "status": "passed",
+     "minutes": 112.1
+    },
+    {
+     "phase": "slo-D42",
+     "status": "passed",
+     "minutes": 113.1
+    },
+    {
+     "phase": "slo-D2",
+     "status": "passed",
+     "minutes": 38.5
+    },
+    {
+     "phase": "cap-D",
+     "status": "passed",
+     "minutes": 6.0
+    },
+    {
+     "phase": "cap-D42",
+     "status": "passed",
+     "minutes": 4.9
+    },
+    {
+     "phase": "cap-D24",
+     "status": "passed",
+     "minutes": 5.4
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 114.99s (0:01:54)"
+   ],
+   "serving_phases": {
+    "slo-D": {
+     "seconds_to_healthy": 422,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      233152
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": true
+     }
+    },
+    "slo-D24": {
+     "seconds_to_healthy": 302,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      137728,
+      137728
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 8,
+       "strategy": "linear",
+       "local_experts": 32,
+       "global_experts": 256
+      }
+     ],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-D42": {
+     "seconds_to_healthy": 272,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      515648
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-D2": {
+     "seconds_to_healthy": 241,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      244416
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    },
+    "cap-D": {
+     "seconds_to_healthy": 342,
+     "nccl": "tcp",
+     "served_max_model_len": 232256,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      232256
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    },
+    "cap-D42": {
+     "seconds_to_healthy": 271,
+     "nccl": "tcp",
+     "served_max_model_len": 262144,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      512832
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    },
+    "cap-D24": {
+     "seconds_to_healthy": 301,
+     "nccl": "tcp",
+     "served_max_model_len": 137600,
+     "requested_max_model_len": 262144,
+     "kv_tokens_per_engine": [
+      137600,
+      137600
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 8,
+       "strategy": "linear",
+       "local_experts": 32,
+       "global_experts": 256
+      }
+     ],
+     "functional": {
+      "passed": 4,
+      "total": 4,
+      "checks": [
+       "ko_capital",
+       "en_multiply",
+       "ko_translate",
+       "code_is_prime"
+      ]
+     }
+    }
+   },
+   "hosts_sha256": {
+    "node0": "680401e693a1"
+   }
+  },
+  {
+   "label": "round3-fp8",
+   "status": "Completed",
+   "nodes": 2,
+   "start_date": "2026-11-17",
+   "run_hours": 9.296,
+   "node_hours": 18.59,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 2.0
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 27.4
+    },
+    {
+     "phase": "slo-A",
+     "status": "passed",
+     "minutes": 154.0
+    },
+    {
+     "phase": "slo-B0",
+     "status": "passed",
+     "minutes": 156.9
+    },
+    {
+     "phase": "slo-C8m",
+     "status": "passed",
+     "minutes": 161.5
+    },
+    {
+     "phase": "slo-A2",
+     "status": "passed",
+     "minutes": 37.1
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 115.15s (0:01:55)"
+   ],
+   "serving_phases": {
+    "slo-A": {
+     "seconds_to_healthy": 262,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      663104
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": true
+     }
+    },
+    "slo-B0": {
+     "seconds_to_healthy": 322,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      292352
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-C8m": {
+     "seconds_to_healthy": 349,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      149888,
+      149888,
+      149888,
+      149888
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 16,
+       "strategy": "linear",
+       "local_experts": 16,
+       "global_experts": 256
+      }
+     ],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-A2": {
+     "seconds_to_healthy": 191,
+     "nccl": "ib",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      685440
+     ],
+     "enforce_eager": false,
+     "nodes": 2,
+     "moe_backend": "Using MARLIN Fp8 MoE backend out of potential backends: ['AITER', 'FLASHINFER_TRTLLM', 'FLASHINFER_CUTLASS', 'DEEPGEMM', 'TRITON', 'MARLIN', 'BATCHED_DEEPGEMM', 'BATCHED_TRITON', 'XPU', 'CPU'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    }
+   },
+   "soak": {
+    "slo-A": {
+     "rate": 0.638,
+     "valid": true,
+     "flags": [],
+     "steady_requests": 1685,
+     "steady_failed": 0,
+     "goodput": {
+      "standard": 1.0,
+      "strict": 0.1045
+     },
+     "ttft_p90_ms": 702.55,
+     "tpot_p90_ms": 84.904,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.0936,
+      "running": 47.0
+     },
+     "series": {
+      "samples": 265,
+      "kv_first_tenth": 0.0413,
+      "kv_last_tenth": 0.0361,
+      "kv_max": 0.09,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    },
+    "slo-B0": {
+     "rate": 0.646,
+     "valid": true,
+     "flags": [
+      "1 failed requests (SLO misses)"
+     ],
+     "steady_requests": 1705,
+     "steady_failed": 1,
+     "goodput": {
+      "standard": 0.9994,
+      "strict": 0.0833
+     },
+     "ttft_p90_ms": 656.389,
+     "tpot_p90_ms": 78.806,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.2036,
+      "running": 45.0
+     },
+     "series": {
+      "samples": 265,
+      "kv_first_tenth": 0.0881,
+      "kv_last_tenth": 0.0875,
+      "kv_max": 0.1813,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    },
+    "slo-C8m": {
+     "rate": 0.539,
+     "valid": true,
+     "flags": [],
+     "steady_requests": 1423,
+     "steady_failed": 0,
+     "goodput": {
+      "standard": 1.0,
+      "strict": 0.0
+     },
+     "ttft_p90_ms": 1075.932,
+     "tpot_p90_ms": 80.845,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.0543,
+      "running": 39.0
+     },
+     "series": {
+      "samples": 265,
+      "kv_first_tenth": 0.0256,
+      "kv_last_tenth": 0.0291,
+      "kv_max": 0.0521,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    }
+   },
+   "hosts_sha256": {
+    "node0": "d50cb0f07e8b",
+    "node1": "4f4d6dc8ba68"
+   }
+  },
+  {
+   "label": "round3-nvfp4",
+   "status": "Completed",
+   "nodes": 1,
+   "start_date": "2026-11-17",
+   "run_hours": 8.912,
+   "node_hours": 8.91,
+   "phases": [
+    {
+     "phase": "kernel_tests",
+     "status": "passed",
+     "minutes": 2.0
+    },
+    {
+     "phase": "full_download",
+     "status": "passed",
+     "minutes": 6.1
+    },
+    {
+     "phase": "slo-D",
+     "status": "passed",
+     "minutes": 157.1
+    },
+    {
+     "phase": "slo-D42",
+     "status": "passed",
+     "minutes": 158.9
+    },
+    {
+     "phase": "slo-D24",
+     "status": "passed",
+     "minutes": 157.4
+    },
+    {
+     "phase": "slo-D2",
+     "status": "passed",
+     "minutes": 38.6
+    }
+   ],
+   "kernel_tests": [
+    "95 passed in 115.32s (0:01:55)"
+   ],
+   "serving_phases": {
+    "slo-D": {
+     "seconds_to_healthy": 433,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      233152
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": true
+     }
+    },
+    "slo-D42": {
+     "seconds_to_healthy": 281,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      515648
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": [],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-D24": {
+     "seconds_to_healthy": 302,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      137728,
+      137728
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using AgRsAll2AllManager all2all manager.",
+      "Using MoEPrepareAndFinalizeNaiveDPEPModular"
+     ],
+     "expert_placement": [
+      {
+       "ep_rank": 0,
+       "ep_size": 8,
+       "strategy": "linear",
+       "local_experts": 32,
+       "global_experts": 256
+      }
+     ],
+     "realtext_client": {
+      "pandas": "2.3.3",
+      "installed": false
+     }
+    },
+    "slo-D2": {
+     "seconds_to_healthy": 241,
+     "nccl": "tcp",
+     "served_max_model_len": 131072,
+     "requested_max_model_len": 131072,
+     "kv_tokens_per_engine": [
+      244416
+     ],
+     "enforce_eager": false,
+     "nodes": 1,
+     "moe_backend": "Using 'MARLIN' NvFp4 MoE backend out of potential backends: ['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL', 'FLASHINFER_CUTEDSL_BATCHED', 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'EMULATION'].",
+     "dispatch": [
+      "Using MoEPrepareAndFinalizeNoDPEPModular"
+     ],
+     "expert_placement": []
+    }
+   },
+   "soak": {
+    "slo-D": {
+     "rate": 0.663,
+     "valid": true,
+     "flags": [],
+     "steady_requests": 1750,
+     "steady_failed": 0,
+     "goodput": {
+      "standard": 1.0,
+      "strict": 0.4543
+     },
+     "ttft_p90_ms": 678.848,
+     "tpot_p90_ms": 71.061,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.2479,
+      "running": 44.0
+     },
+     "series": {
+      "samples": 266,
+      "kv_first_tenth": 0.1017,
+      "kv_last_tenth": 0.1269,
+      "kv_max": 0.2479,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    },
+    "slo-D24": {
+     "rate": 0.647,
+     "valid": true,
+     "flags": [],
+     "steady_requests": 1708,
+     "steady_failed": 0,
+     "goodput": {
+      "standard": 1.0,
+      "strict": 0.0457
+     },
+     "ttft_p90_ms": 799.08,
+     "tpot_p90_ms": 70.268,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.2022,
+      "running": 40.0
+     },
+     "series": {
+      "samples": 265,
+      "kv_first_tenth": 0.0958,
+      "kv_last_tenth": 0.1009,
+      "kv_max": 0.1846,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    },
+    "slo-D42": {
+     "rate": 0.495,
+     "valid": true,
+     "flags": [
+      "1 failed requests (SLO misses)"
+     ],
+     "steady_requests": 1307,
+     "steady_failed": 1,
+     "goodput": {
+      "standard": 0.9992,
+      "strict": 0.1653
+     },
+     "ttft_p90_ms": 795.704,
+     "tpot_p90_ms": 73.856,
+     "preemptions": 0.0,
+     "peaks": {
+      "kv_cache_usage": 0.0837,
+      "running": 33.0
+     },
+     "series": {
+      "samples": 265,
+      "kv_first_tenth": 0.0337,
+      "kv_last_tenth": 0.0355,
+      "kv_max": 0.0787,
+      "waiting_first_tenth": 0.0,
+      "waiting_last_tenth": 0.0,
+      "waiting_max": 0.0
+     }
+    }
+   },
+   "hosts_sha256": {
+    "node0": "a561cbec5f9a"
+   }
+  }
+ ]
+}
